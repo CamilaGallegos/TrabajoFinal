@@ -1,6 +1,6 @@
 from django.db.models.signals import post_save, post_delete, pre_save
 from django.dispatch import receiver
-from .models import DetalleVenta
+from .models import DetalleVenta, Venta, AuditoriaVenta
 
 @receiver(pre_save, sender=DetalleVenta)
 def guardar_cantidad_anterior(sender, instance, **kwargs):
@@ -54,3 +54,21 @@ def devolver_stock(sender, instance, **kwargs):
 def asignar_precio_unitario(sender, instance, **kwargs):
     if not instance.precio_unitario:
         instance.precio_unitario = instance.producto.precio
+#auditoria
+@receiver(pre_save, sender=Venta)
+def auditar_cambios_venta(sender, instance, **kwargs):
+    if instance.pk:
+        try:
+            old_instance = Venta.objects.get(pk=instance.pk)
+            
+            if old_instance.total != instance.total:
+                AuditoriaVenta.objects.create(
+                    venta=instance,
+                    usuario_corrector=instance.becado.user,
+                    campo_modificado="total",
+                    valor_anterior=str(old_instance.total),
+                    valor_nuevo=str(instance.total),
+                    motivo="Ajuste automático por cambio en detalles"
+                )
+        except Venta.DoesNotExist:
+            pass

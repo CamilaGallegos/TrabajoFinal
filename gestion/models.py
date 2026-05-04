@@ -68,3 +68,17 @@ class DetalleVenta(models.Model):
 
     def __str__(self):
         return f"{self.producto.nombre} x {self.cantidad}"
+    
+# auditoria
+class AuditoriaVenta(models.Model):
+    venta = models.ForeignKey(Venta, on_delete=models.CASCADE, related_name='auditorias')
+    usuario_corrector = models.ForeignKey(User, on_delete=models.PROTECT)
+    fecha_correccion = models.DateTimeField(auto_now_add=True)
+    
+    campo_modificado = models.CharField(max_length=100) 
+    valor_anterior = models.CharField(max_length=255)
+    valor_nuevo = models.CharField(max_length=255)
+    motivo = models.TextField(blank=True)
+
+    def __str__(self):
+        return f"Corrección Venta {self.venta.id} - {self.fecha_correccion.strftime('%d/%m/%y')}"

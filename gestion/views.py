@@ -3,13 +3,18 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import AccessToken
-from .models import Producto, PerfilBecado, Asistencia
-from .serializers import ProductoSerializer
+from .models import Producto, PerfilBecado, Asistencia, CuentaAbierta
+from .serializers import ProductoSerializer, CuentaAbiertaSerializer
 from django.utils import timezone
 
 class ProductoViewSet(viewsets.ModelViewSet):
     queryset = Producto.objects.all()
     serializer_class = ProductoSerializer
+
+
+class CuentaAbiertaViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = CuentaAbierta.objects.all().order_by('nombre_departamento')
+    serializer_class = CuentaAbiertaSerializer
 
 class FichajeEntradaView(APIView):
     authentication_classes = []

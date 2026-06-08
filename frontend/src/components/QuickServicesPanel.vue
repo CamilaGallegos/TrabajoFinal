@@ -121,8 +121,14 @@ const onBusquedaInput = (event) => {
   border-radius: 14px;
   background: #fff;
   padding: 16px;
-  max-height: 80vh;
-  overflow: auto;
+  height: fit-content;
+  overflow: visible;
+}
+
+@media (min-width: 1081px) {
+  .quick-panel {
+    min-height: calc(100vh - 250px);
+  }
 }
 
 .servicio-bloque {
@@ -138,9 +144,9 @@ const onBusquedaInput = (event) => {
 
 .servicio-bloque h3 {
   margin: 0 0 8px;
-  font-size: 34px;
+  font-size: 18px;
   letter-spacing: 1px;
-  font-weight: 300;
+  font-weight: 700;
 }
 
 .servicio-row {
@@ -152,8 +158,9 @@ const onBusquedaInput = (event) => {
 }
 
 .servicio-label {
-  font-size: 30px;
+  font-size: 15px;
   text-transform: lowercase;
+  font-weight: 600;
 }
 
 .servicio-actions {
@@ -219,7 +226,7 @@ const onBusquedaInput = (event) => {
   padding: 12px 40px 12px 14px;
   border-radius: 14px;
   border: 2px solid #3a4453;
-  font-size: 14px;
+  font-size: 15px;
   box-sizing: border-box;
 }
 

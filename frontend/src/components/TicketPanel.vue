@@ -169,6 +169,20 @@ const cuentaSeleccionadaModel = computed({
   border-radius: 14px;
   background: #fff;
   padding: 16px;
+  height: fit-content;
+}
+
+@media (min-width: 1081px) {
+  .ticket-panel {
+    min-height: calc(100vh - 250px);
+  }
+}
+
+.ticket-panel h3 {
+  margin: 0 0 10px;
+  font-size: 18px;
+  font-weight: 700;
+  color: #08324a;
 }
 
 .empty-ticket {

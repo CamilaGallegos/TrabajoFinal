@@ -67,11 +67,15 @@ const cargarDatosSesion = async () => {
 const {
   dniInput,
   isAuthenticated,
+  becadosActivos,
+  sesionActivaId,
   becadoActual,
   errorMensaje,
   infoMensaje,
   iniciarSesion,
   cerrarSesion,
+  cerrarTodasLasSesiones,
+  seleccionarSesionActiva,
   restaurarSesion,
 } = useAuth({
   onLoginSuccess: cargarDatosSesion,
@@ -103,6 +107,14 @@ const confirmarVenta = () => {
 onMounted(async () => {
   await restaurarSesion()
 })
+
+const agregarBecadoActivo = async () => {
+  await iniciarSesion()
+}
+
+const seleccionarBecado = (becadoId) => {
+  seleccionarSesionActiva(String(becadoId))
+}
 </script>
 
 <template>
@@ -123,15 +135,40 @@ onMounted(async () => {
         </div>
 
         <div class="app-header__center">
-          <span class="app-header__label">Becado/a activo/a: </span>
-          <strong class="app-header__value">{{ becadoActual.nombre }}</strong>
+          <span class="app-header__label">Becados/as activos/as: {{ becadosActivos.length }}</span>
+          <div class="activos-lista">
+            <button
+              v-for="becado in becadosActivos"
+              :key="becado.id"
+              type="button"
+              :class="['becado-chip', { activo: String(becado.id) === sesionActivaId }]"
+              @click="seleccionarBecado(becado.id)"
+            >
+              {{ becado.nombre }}
+            </button>
+          </div>
+          <strong v-if="becadoActual" class="app-header__value">Sesión operativa: {{ becadoActual.nombre }}</strong>
           <small class="success-text">{{ infoMensaje }}</small>
         </div>
 
         <div class="app-header__actions">
-          <button @click="cerrarSesion" class="btn-danger">Cerrar Sesión</button>
+          <div class="header-login-add">
+            <input
+              :value="dniInput"
+              type="text"
+              placeholder="DNI"
+              class="header-dni-input"
+              @input="dniInput = $event.target.value"
+              @keyup.enter="agregarBecadoActivo"
+            />
+            <button type="button" class="btn-add" @click="agregarBecadoActivo">Agregar</button>
+          </div>
+          <button @click="cerrarSesion" class="btn-danger">Cerrar Sesión Actual</button>
+          <button @click="cerrarTodasLasSesiones" class="btn-danger btn-danger--secondary">Cerrar Todas</button>
         </div>
       </header>
+
+      <p v-if="errorMensaje" class="header-error">{{ errorMensaje }}</p>
 
       <h1 class="title">Panel de Ventas</h1>
 
@@ -199,6 +236,20 @@ onMounted(async () => {
   padding: 8px 14px;
   background: #c53030;
   color: #fff;
+}
+
+.btn-danger--secondary {
+  background: rgba(133, 21, 21, 0.88);
+}
+
+.btn-add {
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+  font-weight: 700;
+  padding: 8px 12px;
+  background: #ffffff;
+  color: #045b84;
 }
 
 .title {
@@ -274,10 +325,63 @@ onMounted(async () => {
 .app-header__actions {
   flex: 0 0 auto;
   justify-content: flex-end;
+  gap: 8px;
+}
+
+.header-login-add {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.header-dni-input {
+  height: 34px;
+  min-width: 180px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  padding: 0 10px;
+  font-size: 13px;
+  color: #08324a;
+}
+
+.header-dni-input::placeholder {
+  color: #6c8091;
+}
+
+.activos-lista {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+  margin: 2px 0;
+}
+
+.becado-chip {
+  border: 1px solid rgba(255, 255, 255, 0.65);
+  background: rgba(255, 255, 255, 0.15);
+  color: #ffffff;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.becado-chip.activo {
+  background: #ffffff;
+  color: #045b84;
+  border-color: #ffffff;
 }
 
 .success-text {
   color: #dff4ff;
+}
+
+.header-error {
+  margin: 8px 2px 0;
+  color: #a30d0d;
+  font-size: 13px;
+  font-weight: 600;
 }
 
 .ventas-layout {
@@ -319,6 +423,12 @@ onMounted(async () => {
   .app-header__center {
     align-items: flex-start;
     text-align: left;
+  }
+
+  .app-header__actions {
+    width: 100%;
+    flex-wrap: wrap;
+    justify-content: flex-start;
   }
 }
 </style>

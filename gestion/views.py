@@ -1,5 +1,5 @@
 from django.utils import timezone
-from rest_framework import viewsets, status
+from rest_framework import mixins, viewsets, status
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -22,8 +22,8 @@ class CuentaAbiertaViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = CuentaAbierta.objects.all().order_by('nombre_departamento')
     serializer_class = CuentaAbiertaSerializer
 
-# recibe la venta y la guarda
-class VentaViewSet(viewsets.GenericViewSet):
+# recibe la venta y la guarda, tambien lista el historial
+class VentaViewSet(mixins.ListModelMixin, mixins.CreateModelMixin, viewsets.GenericViewSet):
     queryset = Venta.objects.select_related('becado', 'cuenta_abierta').prefetch_related('detalles__producto').all().order_by('-fecha')
 
     def get_serializer_class(self):

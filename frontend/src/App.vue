@@ -1,6 +1,6 @@
 <script setup>
 import axios from 'axios'
-import { onMounted } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import LoginCard from './components/LoginCard.vue'
 import QuickServicesPanel from './components/QuickServicesPanel.vue'
 import TicketPanel from './components/TicketPanel.vue'
@@ -62,7 +62,7 @@ const {
 })
 
 const cargarDatosSesion = async () => {
-  await Promise.all([obtenerProductos(), obtenerCuentasAbiertas()])
+  await Promise.all([obtenerProductos(), obtenerCuentasAbiertas(), obtenerVentas()])
 }
 
 const {
@@ -84,8 +84,34 @@ const {
     resetCatalogo()
     resetCarrito()
     resetPago()
+    ventasRecientes.value = []
+    errorVentas.value = ''
   },
 })
+
+const vistaVentas = ref('panel')
+const ventasRecientes = ref([])
+const cargandoVentas = ref(false)
+const errorVentas = ref('')
+
+const ventasOrdenadas = computed(() => [...ventasRecientes.value])
+
+const obtenerVentas = async () => {
+  cargandoVentas.value = true
+  errorVentas.value = ''
+
+  try {
+    const respuesta = await axios.get('http://localhost:8000/api/ventas/')
+    ventasRecientes.value = Array.isArray(respuesta.data) ? respuesta.data : []
+  } catch (error) {
+    ventasRecientes.value = []
+    errorVentas.value = error?.response?.status === 403
+      ? 'No tenes permisos para ver el historial de ventas'
+      : 'No se pudo cargar el historial de ventas'
+  } finally {
+    cargandoVentas.value = false
+  }
+}
 
 const agregarLibreriaDesdeBusqueda = (producto) => {
   agregarAlCarrito(producto)
@@ -134,13 +160,16 @@ const confirmarVenta = async () => {
   }
 
   infoMensaje.value = 'Venta registrada correctamente!'
-  await obtenerProductos()
+  await Promise.all([obtenerProductos(), obtenerVentas()])
   resetCarrito()
   resetPago()
 }
 
 onMounted(async () => {
   await restaurarSesion()
+  if (isAuthenticated.value) {
+    await obtenerVentas()
+  }
 })
 
 const agregarBecadoActivo = async () => {
@@ -149,6 +178,24 @@ const agregarBecadoActivo = async () => {
 
 const seleccionarBecado = (becadoId) => {
   seleccionarSesionActiva(String(becadoId))
+}
+
+const formatearFechaVenta = (fechaISO) => {
+  return new Intl.DateTimeFormat('es-AR', {
+    dateStyle: 'short',
+    timeStyle: 'short',
+  }).format(new Date(fechaISO))
+}
+
+const volverAlPanel = () => {
+  vistaVentas.value = 'panel'
+}
+
+const irAlHistorial = async () => {
+  vistaVentas.value = 'historial'
+  if (ventasRecientes.value.length === 0 && !cargandoVentas.value) {
+    await obtenerVentas()
+  }
 }
 </script>
 
@@ -207,7 +254,48 @@ const seleccionarBecado = (becadoId) => {
 
       <h1 class="title">Panel de Ventas</h1>
 
-      <div class="ventas-layout">
+      <div class="ventas-nav">
+        <button type="button" :class="['ventas-nav__btn', { activo: vistaVentas === 'panel' }]" @click="volverAlPanel">
+          Registro de ventas
+        </button>
+        <button type="button" :class="['ventas-nav__btn', { activo: vistaVentas === 'historial' }]" @click="irAlHistorial">
+          Historial de ventas
+        </button>
+      </div>
+
+      <section v-if="vistaVentas === 'historial'" class="historial-panel">
+        <div class="historial-panel__header">
+          <div>
+            <h2>Ventas recientes</h2>
+          </div>
+          <button type="button" class="btn-add" @click="volverAlPanel">Volver al panel</button>
+        </div>
+
+        <p v-if="cargandoVentas" class="historial-empty">Cargando ventas...</p>
+        <p v-else-if="errorVentas" class="historial-error">{{ errorVentas }}</p>
+        <p v-else-if="ventasOrdenadas.length === 0" class="historial-empty">Todavia no hay ventas registradas</p>
+
+        <div v-else class="historial-lista">
+          <article v-for="venta in ventasOrdenadas" :key="venta.id" class="historial-item">
+            <div class="historial-item__top">
+              <strong>#{{ venta.id }}</strong>
+              <span>{{ formatearFechaVenta(venta.fecha) }}</span>
+            </div>
+            <div class="historial-item__body">
+              <span>Becado/a: {{ venta.becado_nombre || 'Sin nombre' }}</span>
+              <span>Pago: {{ venta.tipo_pago }}</span>
+              <span>Total: ${{ Number(venta.total).toFixed(2) }}</span>
+            </div>
+            <ul class="historial-detalles">
+              <li v-for="detalle in venta.detalles" :key="`${venta.id}-${detalle.producto_id}`">
+                {{ detalle.producto_nombre }} x {{ detalle.cantidad }}
+              </li>
+            </ul>
+          </article>
+        </div>
+      </section>
+
+      <div v-else class="ventas-layout">
         <QuickServicesPanel
           :bloques-servicios="bloquesServicios"
           :obtener-cantidad-numerica="obtenerCantidadNumerica"
@@ -292,6 +380,110 @@ const seleccionarBecado = (becadoId) => {
   font-size: clamp(24px, 2.1vw, 36px);
   line-height: 1.05;
   color: #08324a;
+}
+
+.ventas-nav {
+  display: flex;
+  gap: 10px;
+  margin: 16px 0 18px;
+}
+
+.ventas-nav__btn {
+  border: 1px solid #b7cad8;
+  background: #ffffff;
+  color: #045b84;
+  border-radius: 999px;
+  padding: 9px 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.ventas-nav__btn.activo {
+  background: #0578af;
+  color: #ffffff;
+  border-color: #0578af;
+}
+
+.historial-panel {
+  border: 1px solid #d8dde6;
+  border-radius: 14px;
+  background: #ffffff;
+  padding: 18px;
+}
+
+.historial-panel__header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: center;
+  margin-bottom: 14px;
+}
+
+.historial-panel__header h2 {
+  margin: 0;
+  font-size: 20px;
+  color: #08324a;
+}
+
+.historial-panel__header p {
+  margin: 4px 0 0;
+  color: #5b6b79;
+}
+
+.historial-lista {
+  display: grid;
+  gap: 12px;
+}
+
+.historial-item {
+  border: 1px solid #e3e8ee;
+  border-radius: 12px;
+  padding: 14px;
+  background: #fdfefe;
+}
+
+.historial-item__top,
+.historial-item__body {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.historial-item__top {
+  margin-bottom: 8px;
+  color: #08324a;
+}
+
+.historial-item__body {
+  font-size: 14px;
+  color: #334155;
+  margin-bottom: 8px;
+}
+
+.historial-detalles {
+  margin: 0;
+  padding-left: 18px;
+  color: #506070;
+  font-size: 13px;
+}
+
+.historial-empty,
+.historial-error {
+  margin: 0;
+  padding: 14px;
+  text-align: center;
+  border-radius: 10px;
+}
+
+.historial-empty {
+  background: #f8fafc;
+  color: #5b6b79;
+}
+
+.historial-error {
+  background: #fff1f2;
+  color: #b42318;
 }
 
 .app-header {

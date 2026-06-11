@@ -257,7 +257,6 @@ export function useAuth(options = {}) {
           if (sesionesActivas.value.length > 0) {
             sesionActivaId.value = sesionesActivas.value[0].id
             aplicarAuthDeSesionActiva()
-            infoMensaje.value = `Sesiones restauradas: ${sesionesActivas.value.length}`
             if (onLoginSuccess) {
               await onLoginSuccess()
             }

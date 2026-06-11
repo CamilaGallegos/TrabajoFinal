@@ -97,6 +97,17 @@ const {
 const ventasRecientes = ref([])
 const cargandoVentas = ref(false)
 const errorVentas = ref('')
+const ventaEnEdicionId = ref(null)
+const ventaDrawer = ref(null)
+const drawerModo = ref('')
+
+const cuentasAbiertasPorId = computed(() => {
+  const mapa = new Map()
+  for (const cuenta of cuentasAbiertas.value) {
+    mapa.set(Number(cuenta.id), cuenta.nombre_departamento)
+  }
+  return mapa
+})
 
 const vistaVentas = computed(() => (route.name === 'historial' ? 'historial' : 'panel'))
 
@@ -158,6 +169,30 @@ const confirmarVenta = async () => {
 
   const payloadVenta = construirPayloadVenta()
 
+  if (ventaEnEdicionId.value) {
+    const motivo = window.prompt('Motivo de la correccion (auditoria):') || ''
+    if (!motivo.trim()) {
+      errorPago.value = 'Para editar una venta debes indicar el motivo de la correccion.'
+      return
+    }
+
+    payloadVenta.motivo_auditoria = motivo.trim()
+
+    try {
+      await axios.patch(`http://localhost:8000/api/ventas/${ventaEnEdicionId.value}/`, payloadVenta)
+    } catch (error) {
+      errorPago.value = obtenerMensajeErrorVenta(error)
+      return
+    }
+
+    infoMensaje.value = `Venta #${ventaEnEdicionId.value} actualizada correctamente.`
+    ventaEnEdicionId.value = null
+    await Promise.all([obtenerProductos(), obtenerVentas()])
+    resetCarrito()
+    resetPago()
+    return
+  }
+
   try {
     await axios.post('http://localhost:8000/api/ventas/', payloadVenta)
   } catch (error) {
@@ -169,6 +204,79 @@ const confirmarVenta = async () => {
   await Promise.all([obtenerProductos(), obtenerVentas()])
   resetCarrito()
   resetPago()
+}
+
+const ventaEditable = (venta) => {
+  const fechaVenta = new Date(venta.fecha).getTime()
+  const ahora = Date.now()
+  const limite = 24 * 60 * 60 * 1000
+  return (ahora - fechaVenta) <= limite
+}
+
+const cargarVentaParaEdicion = async (venta) => {
+  if (!ventaEditable(venta)) {
+    return
+  }
+
+  const mapaProductos = new Map(productos.value.map((p) => [p.id, p]))
+  carrito.value = venta.detalles.map((detalle) => {
+    const productoCatalogo = mapaProductos.get(detalle.producto_id)
+    return {
+      id: detalle.producto_id,
+      nombre: detalle.producto_nombre,
+      precio: Number(detalle.precio_unitario),
+      cantidad: detalle.cantidad,
+      es_servicio: Boolean(productoCatalogo?.es_servicio),
+      stock_maximo: productoCatalogo?.stock ?? null,
+    }
+  })
+
+  tipoPago.value = venta.tipo_pago
+  cuentaSeleccionada.value = venta.cuenta_abierta ?? ''
+  montoEfectivo.value = String(venta.monto_efectivo)
+  montoTransferencia.value = String(venta.monto_transferencia)
+  errorPago.value = ''
+  ventaEnEdicionId.value = venta.id
+
+  await router.push({ name: 'panel' })
+}
+
+const cancelarEdicionVenta = () => {
+  ventaEnEdicionId.value = null
+  resetCarrito()
+  resetPago()
+  infoMensaje.value = 'Edicion cancelada.'
+}
+
+const abrirDetalles = (venta) => {
+  ventaDrawer.value = venta
+  drawerModo.value = 'detalles'
+}
+
+const abrirEditar = (venta) => {
+  ventaDrawer.value = venta
+  drawerModo.value = 'editar'
+}
+
+const cerrarDrawer = () => {
+  ventaDrawer.value = null
+  drawerModo.value = ''
+}
+
+const confirmarEdicionDesdeDrawer = async () => {
+  const ventaSeleccionada = ventaDrawer.value
+  cerrarDrawer()
+  if (ventaSeleccionada) {
+    await cargarVentaParaEdicion(ventaSeleccionada)
+  }
+}
+
+const obtenerNombreCuentaAbierta = (cuentaAbiertaId) => {
+  if (!cuentaAbiertaId) {
+    return ''
+  }
+
+  return cuentasAbiertasPorId.value.get(Number(cuentaAbiertaId)) || `Cuenta #${cuentaAbiertaId}`
 }
 
 onMounted(async () => {
@@ -277,6 +385,11 @@ const irAlHistorial = async () => {
 
       <h1 class="title">Panel de Ventas</h1>
 
+      <div v-if="ventaEnEdicionId" class="edit-banner">
+        <strong>Editando venta #{{ ventaEnEdicionId }}</strong>
+        <button type="button" class="btn-add" @click="cancelarEdicionVenta">Cancelar edicion</button>
+      </div>
+
       <div class="ventas-nav">
         <button type="button" :class="['ventas-nav__btn', { activo: vistaVentas === 'panel' }]" @click="volverAlPanel">
           Registro de ventas
@@ -298,24 +411,108 @@ const irAlHistorial = async () => {
         <p v-else-if="errorVentas" class="historial-error">{{ errorVentas }}</p>
         <p v-else-if="ventasOrdenadas.length === 0" class="historial-empty">Todavia no hay ventas registradas</p>
 
-        <div v-else class="historial-lista">
-          <article v-for="venta in ventasOrdenadas" :key="venta.id" class="historial-item">
-            <div class="historial-item__top">
-              <strong>#{{ venta.id }}</strong>
-              <span>{{ formatearFechaVenta(venta.fecha) }}</span>
-            </div>
-            <div class="historial-item__body">
-              <span>Becado/a: {{ venta.becado_nombre || 'Sin nombre' }}</span>
-              <span>Pago: {{ venta.tipo_pago }}</span>
-              <span>Total: ${{ Number(venta.total).toFixed(2) }}</span>
-            </div>
-            <ul class="historial-detalles">
-              <li v-for="detalle in venta.detalles" :key="`${venta.id}-${detalle.producto_id}`">
-                {{ detalle.producto_nombre }} x {{ detalle.cantidad }}
-              </li>
-            </ul>
-          </article>
-        </div>
+        <table v-else class="historial-table">
+          <tbody>
+            <tr
+              v-for="venta in ventasOrdenadas"
+              :key="venta.id"
+              class="historial-row"
+            >
+              <td class="col-id">#{{ venta.id }}</td>
+              <td class="col-fecha">{{ formatearFechaVenta(venta.fecha) }}</td>
+              <td class="col-total">Total: ${{ Number(venta.total).toFixed(2) }}</td>
+              <td class="col-pago">Pago: {{ venta.tipo_pago }}</td>
+              <td class="col-acciones">
+                <button
+                  type="button"
+                  class="btn-historial btn-editar"
+                  :disabled="!ventaEditable(venta)"
+                  :title="ventaEditable(venta) ? 'Editar venta' : 'Solo editable dentro de las 24 horas'"
+                  @click="abrirEditar(venta)"
+                >
+                  Editar ›
+                </button>
+                <button
+                  type="button"
+                  class="btn-historial btn-detalles"
+                  @click="abrirDetalles(venta)"
+                >
+                  Ver detalles
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+
+        <Teleport to="body">
+          <div v-if="ventaDrawer" class="drawer-overlay" @click.self="cerrarDrawer">
+            <aside class="drawer">
+              <div class="drawer__header">
+                <h3>Venta #{{ ventaDrawer.id }}</h3>
+                <button type="button" class="drawer__close" @click="cerrarDrawer">✕</button>
+              </div>
+
+              <div class="drawer__body">
+                <dl class="drawer-info">
+                  <dt>Fecha</dt>
+                  <dd>{{ formatearFechaVenta(ventaDrawer.fecha) }}</dd>
+                  <dt>Becado/a</dt>
+                  <dd>{{ ventaDrawer.becado_nombre || 'Sin nombre' }}</dd>
+                  <dt>Tipo de pago</dt>
+                  <dd>{{ ventaDrawer.tipo_pago }}</dd>
+                  <template v-if="ventaDrawer.tipo_pago === 'combinado' || ventaDrawer.tipo_pago === 'efectivo'">
+                    <dt>Efectivo</dt>
+                    <dd>${{ Number(ventaDrawer.monto_efectivo).toFixed(2) }}</dd>
+                  </template>
+                  <template v-if="ventaDrawer.tipo_pago === 'combinado' || ventaDrawer.tipo_pago === 'transferencia'">
+                    <dt>Transferencia</dt>
+                    <dd>${{ Number(ventaDrawer.monto_transferencia).toFixed(2) }}</dd>
+                  </template>
+                  <template v-if="ventaDrawer.cuenta_abierta">
+                    <dt>Cuenta abierta</dt>
+                    <dd>{{ obtenerNombreCuentaAbierta(ventaDrawer.cuenta_abierta) }}</dd>
+                  </template>
+                  <dt>Total</dt>
+                  <dd class="total-highlight">${{ Number(ventaDrawer.total).toFixed(2) }}</dd>
+                </dl>
+
+                <h4>Productos</h4>
+                <table class="drawer-table">
+                  <thead>
+                    <tr>
+                      <th>Producto</th>
+                      <th class="right">Cant.</th>
+                      <th class="right">P. Unit.</th>
+                      <th class="right">Subtotal</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="detalle in ventaDrawer.detalles" :key="detalle.producto_id">
+                      <td>{{ detalle.producto_nombre }}</td>
+                      <td class="right">{{ detalle.cantidad }}</td>
+                      <td class="right">${{ Number(detalle.precio_unitario).toFixed(2) }}</td>
+                      <td class="right">${{ (detalle.cantidad * Number(detalle.precio_unitario)).toFixed(2) }}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              <div v-if="drawerModo === 'editar'" class="drawer__footer">
+                <p v-if="!ventaEditable(ventaDrawer)" class="historial-lock">
+                  Esta venta ya no puede editarse (pasaron más de 24 horas).
+                </p>
+                <button
+                  v-else
+                  type="button"
+                  class="btn-primary"
+                  @click="confirmarEdicionDesdeDrawer"
+                >
+                  Editar esta venta
+                </button>
+              </div>
+            </aside>
+          </div>
+        </Teleport>
       </section>
 
       <div v-else class="ventas-layout">
@@ -453,42 +650,192 @@ const irAlHistorial = async () => {
   color: #5b6b79;
 }
 
-.historial-lista {
-  display: grid;
-  gap: 12px;
+.historial-table {
+  width: 100%;
+  border-collapse: collapse;
 }
 
-.historial-item {
-  border: 1px solid #e3e8ee;
-  border-radius: 12px;
-  padding: 14px;
-  background: #fdfefe;
+.historial-row {
+  background: #e8f3fb;
 }
 
-.historial-item__top,
-.historial-item__body {
+.historial-row:nth-child(odd) {
+  background: #dce9f5;
+}
+
+.historial-row td {
+  padding: 11px 14px;
+  vertical-align: middle;
+  font-size: 14px;
+  color: #1a3348;
+}
+
+.col-id {
+  font-weight: 700;
+  width: 50px;
+}
+
+.col-fecha {
+  width: 160px;
+  color: #3b5268;
+}
+
+.col-total {
+  font-weight: 600;
+}
+
+.col-pago {
+  color: #3b5268;
+}
+
+.col-acciones {
+  width: 220px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.btn-historial {
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1.5px solid;
+}
+
+.btn-editar {
+  background: transparent;
+  color: #1a7a3c;
+  border-color: #1a7a3c;
+  margin-right: 6px;
+}
+
+.btn-editar:disabled {
+  color: #94a3b8;
+  border-color: #cbd5e1;
+  cursor: not-allowed;
+}
+
+.btn-detalles {
+  background: transparent;
+  color: #0578af;
+  border-color: #0578af;
+}
+
+.drawer-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+  z-index: 100;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.drawer {
+  width: min(480px, 96vw);
+  height: 100%;
+  background: #fff;
+  display: flex;
+  flex-direction: column;
+  box-shadow: -4px 0 24px rgba(0,0,0,0.15);
+  animation: slide-in 0.2s ease;
+}
+
+@keyframes slide-in {
+  from { transform: translateX(100%); }
+  to   { transform: translateX(0); }
+}
+
+.drawer__header {
   display: flex;
   justify-content: space-between;
-  gap: 12px;
-  flex-wrap: wrap;
+  align-items: center;
+  padding: 18px 20px;
+  border-bottom: 1px solid #e2e8f0;
 }
 
-.historial-item__top {
-  margin-bottom: 8px;
+.drawer__header h3 {
+  margin: 0;
+  font-size: 18px;
   color: #08324a;
 }
 
-.historial-item__body {
-  font-size: 14px;
-  color: #334155;
-  margin-bottom: 8px;
+.drawer__close {
+  background: none;
+  border: none;
+  font-size: 18px;
+  cursor: pointer;
+  color: #64748b;
+  line-height: 1;
 }
 
-.historial-detalles {
+.drawer__body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px;
+}
+
+.drawer__footer {
+  padding: 16px 20px;
+  border-top: 1px solid #e2e8f0;
+}
+
+.drawer-info {
+  display: grid;
+  grid-template-columns: 130px 1fr;
+  gap: 8px 12px;
+  margin: 0 0 20px;
+  font-size: 14px;
+}
+
+.drawer-info dt {
+  color: #64748b;
+  font-weight: 600;
+}
+
+.drawer-info dd {
   margin: 0;
-  padding-left: 18px;
-  color: #506070;
+  color: #1a3348;
+}
+
+.total-highlight {
+  font-weight: 700;
+  font-size: 16px;
+  color: #1a7a3c;
+}
+
+.drawer-table {
+  width: 100%;
+  border-collapse: collapse;
   font-size: 13px;
+}
+
+.drawer-table th,
+.drawer-table td {
+  padding: 8px 6px;
+  border-bottom: 1px solid #e8edf3;
+}
+
+.drawer-table th {
+  text-align: left;
+  color: #64748b;
+  font-weight: 600;
+}
+
+.drawer-table .right {
+  text-align: right;
+}
+
+.btn-primary {
+  width: 100%;
+  padding: 12px;
+  background: #1a7a3c;
+  color: #fff;
+  border: none;
+  border-radius: 10px;
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
 }
 
 .historial-empty,
@@ -632,6 +979,25 @@ const irAlHistorial = async () => {
   color: #a30d0d;
   font-size: 13px;
   font-weight: 600;
+}
+
+.edit-banner {
+  margin: 12px 0;
+  padding: 10px 14px;
+  border: 1px solid #b7cad8;
+  border-radius: 10px;
+  background: #eef6ff;
+  color: #08324a;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.historial-lock {
+  color: #8b1c1c;
+  font-size: 13px;
+  margin: 0 0 10px;
 }
 
 .ventas-layout {

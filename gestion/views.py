@@ -1,11 +1,17 @@
+from django.utils import timezone
 from rest_framework import viewsets, status
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import AccessToken
-from .models import Producto, PerfilBecado, Asistencia, CuentaAbierta
-from .serializers import ProductoSerializer, CuentaAbiertaSerializer
-from django.utils import timezone
+
+from .models import Producto, PerfilBecado, Asistencia, CuentaAbierta, Venta
+from .serializers import (
+    ProductoSerializer,
+    CuentaAbiertaSerializer,
+    VentaCreateSerializer,
+    VentaSerializer,
+)
 
 class ProductoViewSet(viewsets.ModelViewSet):
     queryset = Producto.objects.all()
@@ -15,6 +21,23 @@ class ProductoViewSet(viewsets.ModelViewSet):
 class CuentaAbiertaViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = CuentaAbierta.objects.all().order_by('nombre_departamento')
     serializer_class = CuentaAbiertaSerializer
+
+# recibe la venta y la guarda
+class VentaViewSet(viewsets.GenericViewSet):
+    queryset = Venta.objects.select_related('becado', 'cuenta_abierta').prefetch_related('detalles__producto').all().order_by('-fecha')
+
+    def get_serializer_class(self):
+        if self.action == 'create':
+            return VentaCreateSerializer
+        return VentaSerializer
+
+    def create(self, request):
+        serializer = self.get_serializer(data=request.data, context={'request': request})
+        serializer.is_valid(raise_exception=True)
+        venta = serializer.save()
+        response_serializer = VentaSerializer(venta)
+        return Response(response_serializer.data, status=status.HTTP_201_CREATED)
+
 
 class FichajeEntradaView(APIView):
     authentication_classes = []

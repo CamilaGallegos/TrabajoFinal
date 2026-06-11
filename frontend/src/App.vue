@@ -1,4 +1,5 @@
 <script setup>
+import axios from 'axios'
 import { onMounted } from 'vue'
 import LoginCard from './components/LoginCard.vue'
 import QuickServicesPanel from './components/QuickServicesPanel.vue'
@@ -91,15 +92,49 @@ const agregarLibreriaDesdeBusqueda = (producto) => {
   busquedaLibreria.value = ''
 }
 
-const confirmarVenta = () => {
+const obtenerMensajeErrorVenta = (error) => {
+  const data = error?.response?.data
+
+  if (!data) {
+    return 'No se pudo registrar la venta, intenta nuevamente.'
+  }
+
+  if (typeof data === 'string') {
+    return data
+  }
+
+  if (Array.isArray(data)) {
+    return data.join(' ')
+  }
+
+  const primerValor = Object.values(data)[0]
+  if (Array.isArray(primerValor)) {
+    return primerValor[0]
+  }
+
+  if (typeof primerValor === 'string') {
+    return primerValor
+  }
+
+  return 'No se pudo registrar la venta, revisa los datos e intenta nuevamente.'
+}
+
+const confirmarVenta = async () => {
   if (!validarPrevioConfirmacion()) {
     return
   }
 
   const payloadVenta = construirPayloadVenta()
-  console.log('Venta lista para enviar:', payloadVenta)
 
-  infoMensaje.value = 'Venta preparada correctamente. Falta conectar el endpoint para guardarla.'
+  try {
+    await axios.post('http://localhost:8000/api/ventas/', payloadVenta)
+  } catch (error) {
+    errorPago.value = obtenerMensajeErrorVenta(error)
+    return
+  }
+
+  infoMensaje.value = 'Venta registrada correctamente!'
+  await obtenerProductos()
   resetCarrito()
   resetPago()
 }

@@ -44,20 +44,37 @@ class CuentaAbierta(models.Model):
         return self.nombre_departamento
 
 class Venta(models.Model):
+    TIPO_PAGO_EFECTIVO = 'efectivo'
+    TIPO_PAGO_TRANSFERENCIA = 'transferencia'
+    TIPO_PAGO_COMBINADO = 'combinado'
+    TIPO_PAGO_CUENTA_ABIERTA = 'cuenta_abierta'
+
+    TIPO_PAGO_CHOICES = [
+        (TIPO_PAGO_EFECTIVO, 'Efectivo'),
+        (TIPO_PAGO_TRANSFERENCIA, 'Transferencia'),
+        (TIPO_PAGO_COMBINADO, 'Combinado'),
+        (TIPO_PAGO_CUENTA_ABIERTA, 'Cuenta Abierta'),
+    ]
+
     becado = models.ForeignKey(PerfilBecado, on_delete=models.PROTECT)
     fecha = models.DateTimeField(auto_now_add=True)
     total = models.DecimalField(max_digits=10, decimal_places=2, default=0)
-    
+    tipo_pago = models.CharField(max_length=20, choices=TIPO_PAGO_CHOICES, default=TIPO_PAGO_EFECTIVO)
+    monto_efectivo = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    monto_transferencia = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+
     cuenta_abierta = models.ForeignKey(
-        CuentaAbierta, 
-        on_delete=models.SET_NULL, 
-        null=True, 
+        CuentaAbierta,
+        on_delete=models.SET_NULL,
+        null=True,
         blank=True,
         related_name='ventas'
     )
 
     def __str__(self):
-        tipo = f"Cuenta: {self.cuenta_abierta}" if self.cuenta_abierta else "Efectivo"
+        tipo = self.get_tipo_pago_display()
+        if self.cuenta_abierta:
+            tipo = f"Cuenta: {self.cuenta_abierta}"
         return f"Venta {self.id} - {tipo} (${self.total})"
 
 class DetalleVenta(models.Model):

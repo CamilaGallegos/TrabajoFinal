@@ -188,7 +188,7 @@ class VentaUpdateSerializer(serializers.Serializer):
         if len(set(productos_ids)) != len([pid for pid in set(productos_ids) if pid in productos_map]):
             raise serializers.ValidationError('Uno o más productos seleccionados no existen')
 
-        # Restituye stock de los detalles actuales antes de recalcular la venta
+        # revertir cambios de stock de los detalles anteriores
         detalles_anteriores = list(instance.detalles.select_related('producto').all())
         for detalle in detalles_anteriores:
             producto = productos_map.get(detalle.producto_id)

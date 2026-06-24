@@ -97,6 +97,11 @@ const {
 const ventasRecientes = ref([])
 const cargandoVentas = ref(false)
 const errorVentas = ref('')
+const searchTerm = ref('')
+const filtroTipoPago = ref('')
+const filtroBecado = ref('')
+const fechaDesde = ref('')
+const fechaHasta = ref('')
 const ventaEnEdicionId = ref(null)
 const ventaDrawer = ref(null)
 const drawerModo = ref('')
@@ -111,7 +116,73 @@ const cuentasAbiertasPorId = computed(() => {
 
 const vistaVentas = computed(() => (route.name === 'historial' ? 'historial' : 'panel'))
 
-const ventasOrdenadas = computed(() => [...ventasRecientes.value])
+const tiposPagoDisponibles = [
+  { value: '', label: 'Sin filtro' },
+  { value: 'efectivo', label: 'Efectivo' },
+  { value: 'transferencia', label: 'Transferencia' },
+  { value: 'combinado', label: 'Combinado' },
+  { value: 'cuenta_abierta', label: 'Cuenta abierta' },
+]
+
+const becadosUnicos = computed(() => {
+  const mapa = new Map()
+  for (const venta of ventasRecientes.value) {
+    if (venta.becado_nombre) {
+      mapa.set(venta.becado_nombre, venta.becado_nombre)
+    }
+  }
+  return Array.from(mapa.values())
+})
+
+const textoCoincide = (venta, texto) => {
+  const valor = [
+    String(venta.id),
+    venta.becado_nombre || '',
+    venta.tipo_pago || '',
+    venta.detalles?.map((detalle) => detalle.producto_nombre).join(' '),
+    String(venta.total),
+  ].join(' ').toLowerCase()
+  return valor.includes(texto.toLowerCase())
+}
+
+const parsearFecha = (valor) => {
+  if (!valor) return null
+  const fecha = new Date(valor)
+  return Number.isNaN(fecha.getTime()) ? null : fecha
+}
+
+const ventasFiltradas = computed(() => {
+  return ventasRecientes.value
+    .filter((venta) => {
+      if (filtroTipoPago.value && venta.tipo_pago !== filtroTipoPago.value) {
+        return false
+      }
+      if (filtroBecado.value && venta.becado_nombre !== filtroBecado.value) {
+        return false
+      }
+      if (fechaDesde.value) {
+        const desde = parsearFecha(fechaDesde.value)
+        const ventaFecha = parsearFecha(venta.fecha)
+        if (desde && ventaFecha && ventaFecha < desde) {
+          return false
+        }
+      }
+      if (fechaHasta.value) {
+        const hasta = parsearFecha(fechaHasta.value)
+        const ventaFecha = parsearFecha(venta.fecha)
+        if (hasta && ventaFecha && ventaFecha > new Date(hasta.getTime() + 24 * 60 * 60 * 1000 - 1)) {
+          return false
+        }
+      }
+      if (searchTerm.value) {
+        return textoCoincide(venta, searchTerm.value)
+      }
+      return true
+    })
+    .sort((a, b) => new Date(b.fecha) - new Date(a.fecha))
+})
+
+const ventasOrdenadas = computed(() => ventasFiltradas.value)
 
 const obtenerVentas = async () => {
   cargandoVentas.value = true
@@ -407,9 +478,46 @@ const irAlHistorial = async () => {
           <button type="button" class="btn-add" @click="volverAlPanel">Volver al panel</button>
         </div>
 
+        <div class="historial-filtros">
+          <div class="filtro-item filtro-buscar">
+            <label for="searchTerm">Buscar</label>
+            <input
+              id="searchTerm"
+              type="text"
+              placeholder="Becada/o, producto..."
+              v-model="searchTerm"
+            />
+          </div>
+          <div class="filtro-item">
+            <label for="filtroTipoPago">Tipo de pago</label>
+            <select id="filtroTipoPago" v-model="filtroTipoPago">
+              <option v-for="opcion in tiposPagoDisponibles" :key="opcion.value" :value="opcion.value">
+                {{ opcion.label }}
+              </option>
+            </select>
+          </div>
+          <div class="filtro-item">
+            <label for="filtroBecado">Becado/a</label>
+            <select id="filtroBecado" v-model="filtroBecado">
+              <option value="">Sin filtro</option>
+              <option v-for="becado in becadosUnicos" :key="becado" :value="becado">
+                {{ becado }}
+              </option>
+            </select>
+          </div>
+          <div class="filtro-item filtro-fecha">
+            <label for="fechaDesde">Desde</label>
+            <input id="fechaDesde" type="date" v-model="fechaDesde" />
+          </div>
+          <div class="filtro-item filtro-fecha">
+            <label for="fechaHasta">Hasta</label>
+            <input id="fechaHasta" type="date" v-model="fechaHasta" />
+          </div>
+        </div>
+
         <p v-if="cargandoVentas" class="historial-empty">Cargando ventas...</p>
         <p v-else-if="errorVentas" class="historial-error">{{ errorVentas }}</p>
-        <p v-else-if="ventasOrdenadas.length === 0" class="historial-empty">Todavia no hay ventas registradas</p>
+        <p v-else-if="ventasOrdenadas.length === 0" class="historial-empty">No se encontraron ventas con esos filtros</p>
 
         <table v-else class="historial-table">
           <tbody>
@@ -637,6 +745,52 @@ const irAlHistorial = async () => {
   gap: 16px;
   align-items: center;
   margin-bottom: 14px;
+}
+
+.historial-filtros {
+  display: grid;
+  grid-template-columns: 1fr 140px 140px 120px 120px;
+  gap: 8px;
+  align-items: end;
+  margin-bottom: 12px;
+}
+
+.filtro-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.filtro-buscar {
+  grid-column: 1 / 2;
+}
+
+.filtro-fecha input {
+  width: 100%;
+  height: 34px;
+}
+
+.filtro-item label {
+  font-size: 11px;
+  color: #334155;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+}
+
+.filtro-item input,
+.filtro-item select {
+  width: 100%;
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid #cbd5e1;
+  font-size: 13px;
+  height: 34px;
+}
+
+@media (max-width: 960px) {
+  .historial-filtros {
+    grid-template-columns: 1fr;
+  }
 }
 
 .historial-panel__header h2 {

@@ -39,6 +39,13 @@ export function useCatalogo() {
         { base: 'DNI', variante: 'Doble', etiqueta: 'doble faz' },
       ],
     },
+    {
+      titulo: 'ANILLADO',
+      destacado: false,
+      items: [
+        { base: 'Anillado', variante: '', etiqueta: 'copias a anillar' },
+      ],
+    },
   ]
 
   const libreriaFiltrada = computed(() => {

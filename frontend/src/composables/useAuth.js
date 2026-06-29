@@ -23,6 +23,33 @@ export function useAuth(options = {}) {
 
   const timersPorSesion = new Map()
 
+  const obtenerRolDeSesion = (sesion) => {
+    if (!sesion) {
+      return 'becado'
+    }
+
+    if (sesion.role === 'admin') {
+      return 'admin'
+    }
+
+    if (sesion.isAdmin) {
+      return 'admin'
+    }
+
+    return 'becado'
+  }
+
+  const rolActual = computed(() => {
+    const sesionActiva = sesionesActivas.value.find((sesion) => sesion.id === sesionActivaId.value)
+    if (sesionActiva) {
+      return obtenerRolDeSesion(sesionActiva)
+    }
+
+    return localStorage.getItem('sigfo_role') === 'admin' ? 'admin' : 'becado'
+  })
+
+  const esAdmin = computed(() => rolActual.value === 'admin')
+
   const setAuthToken = (jwtToken) => {
     if (jwtToken) {
       axios.defaults.headers.common.Authorization = `Bearer ${jwtToken}`
@@ -53,8 +80,16 @@ export function useAuth(options = {}) {
       token: sesion.token,
       becado: sesion.becado,
       msg: sesion.msg || '',
+      isAdmin: obtenerRolDeSesion(sesion) === 'admin',
+      role: obtenerRolDeSesion(sesion),
     }))
     localStorage.setItem(STORAGE_SESIONES, JSON.stringify(payload))
+
+    if (rolActual.value === 'admin') {
+      localStorage.setItem('sigfo_role', 'admin')
+    } else {
+      localStorage.removeItem('sigfo_role')
+    }
   }
 
   const aplicarAuthDeSesionActiva = () => {
@@ -91,6 +126,7 @@ export function useAuth(options = {}) {
       setAuthToken('')
       localStorage.removeItem('sigfo_token')
       localStorage.removeItem('sigfo_becado')
+      localStorage.removeItem('sigfo_role')
       localStorage.removeItem(STORAGE_SESIONES)
       dniInput.value = ''
       passwordInput.value = ''
@@ -133,6 +169,7 @@ export function useAuth(options = {}) {
     loginAdmin.value = false
     localStorage.removeItem('sigfo_token')
     localStorage.removeItem('sigfo_becado')
+    localStorage.removeItem('sigfo_role')
     localStorage.removeItem(STORAGE_SESIONES)
     if (onLogout) {
       onLogout()
@@ -207,17 +244,23 @@ export function useAuth(options = {}) {
 
       const idSesion = String(respuesta.data.becado.id)
       const tokenNuevo = respuesta.data.token
+      const esAdminLogin = Boolean(respuesta.data.is_admin)
+      const rolLogin = esAdminLogin ? 'admin' : 'becado'
       const sesionExistente = sesionesActivas.value.find((sesion) => sesion.id === idSesion)
 
       if (sesionExistente) {
         sesionExistente.token = tokenNuevo
         sesionExistente.msg = respuesta.data.msg
+        sesionExistente.isAdmin = esAdminLogin
+        sesionExistente.role = rolLogin
       } else {
         sesionesActivas.value.push({
           id: idSesion,
           token: tokenNuevo,
           becado: respuesta.data.becado,
           msg: respuesta.data.msg,
+          isAdmin: esAdminLogin,
+          role: rolLogin,
         })
       }
 
@@ -274,6 +317,8 @@ export function useAuth(options = {}) {
               token: sesion.token,
               becado: sesion.becado,
               msg: sesion.msg || '',
+              isAdmin: obtenerRolDeSesion(sesion) === 'admin',
+              role: obtenerRolDeSesion(sesion),
             })
           }
 
@@ -314,6 +359,8 @@ export function useAuth(options = {}) {
       token: tokenGuardado,
       becado,
       msg: '',
+      isAdmin: false,
+      role: 'becado',
     }]
     sesionActivaId.value = idSesion
     aplicarAuthDeSesionActiva()
@@ -339,6 +386,7 @@ export function useAuth(options = {}) {
     becadoActual,
     errorMensaje,
     infoMensaje,
+    esAdmin,
     iniciarSesion,
     cerrarSesion,
     cerrarTodasLasSesiones,

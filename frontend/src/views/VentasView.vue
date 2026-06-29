@@ -80,6 +80,7 @@ const {
   becadoActual,
   errorMensaje,
   infoMensaje,
+  esAdmin,
   iniciarSesion,
   cerrarSesion,
   cerrarTodasLasSesiones,
@@ -425,7 +426,7 @@ const irAlHistorial = async () => {
           <span class="app-header__subtitle">Sistema de Gestión de la Fotocopiadora del CURZAS</span>
         </div>
 
-        <div class="app-header__center">
+        <div class="app-header__center" v-if="!esAdmin">
           <span class="app-header__label">Becados/as activos/as: {{ becadosActivos.length }}</span>
           <div class="activos-lista">
             <button
@@ -442,8 +443,13 @@ const irAlHistorial = async () => {
           <small class="success-text">{{ infoMensaje }}</small>
         </div>
 
+        <div v-else class="app-header__center">
+          <strong class="app-header__value">Panel admin</strong>
+          <small class="success-text">{{ infoMensaje }}</small>
+        </div>
+
         <div class="app-header__actions">
-          <div class="header-login-add">
+          <div v-if="!esAdmin" class="header-login-add">
             <input
               :value="dniInput"
               type="text"
@@ -454,6 +460,9 @@ const irAlHistorial = async () => {
             />
             <button type="button" class="btn-add" @click="agregarBecadoActivo">Agregar</button>
           </div>
+          <button v-if="esAdmin" type="button" class="btn-add" @click="router.push({ name: 'admin-dashboard' })">
+            Admin dashboard
+          </button>
           <button @click="cerrarSesion" class="btn-danger">Cerrar Sesión Actual</button>
           <button @click="cerrarTodasLasSesiones" class="btn-danger btn-danger--secondary">Cerrar Todas</button>
         </div>

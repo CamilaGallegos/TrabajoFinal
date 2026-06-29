@@ -71,6 +71,9 @@ const cargarDatosSesion = async () => {
 
 const {
   dniInput,
+  passwordInput,
+  requierePassword,
+  loginAdmin,
   isAuthenticated,
   becadosActivos,
   sesionActivaId,
@@ -406,8 +409,12 @@ const irAlHistorial = async () => {
     <LoginCard
       v-if="!isAuthenticated"
       :dni-input="dniInput"
+      :password-input="passwordInput"
       :error-mensaje="errorMensaje"
+      :requires-password="requierePassword"
+      :is-admin="loginAdmin"
       @update:dni-input="dniInput = $event"
+      @update:password-input="passwordInput = $event"
       @iniciar-sesion="iniciarSesion"
     />
 

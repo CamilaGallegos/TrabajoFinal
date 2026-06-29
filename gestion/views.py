@@ -70,41 +70,65 @@ class FichajeEntradaView(APIView):
 
     def post(self, request):
         dni_recibido = request.data.get('dni')
-        
+        password_recibido = request.data.get('password', '')
+
         if not dni_recibido:
             return Response({"error": "El DNI es requerido"}, status=status.HTTP_400_BAD_REQUEST)
-        
-        try:
-            # buscamos al becado por su DNI
-            becado = PerfilBecado.objects.get(dni=dni_recibido)
-            usuario = becado.user
-            
-            # fichaje automatico
-            hoy = timezone.now().date()
-            asistencia_existente = Asistencia.objects.filter(
-                becado=becado, 
-                entrada__date=hoy, 
-                salida__isnull=True
-            ).exists()
-            
-            if not asistencia_existente:
-                Asistencia.objects.create(becado=becado)
-                mensaje_fichaje = "Asistencia registrada con éxito!"
-            else:
-                mensaje_fichaje = "Ya tenes una asistencia activa de hoy"
 
-            # token JWT para el turno actual
+        try:
+            becado = PerfilBecado.objects.select_related('user').get(dni=dni_recibido)
+            usuario = becado.user
+            es_admin = bool(usuario.is_staff or usuario.is_superuser)
+
+            if es_admin:
+                if not password_recibido:
+                    return Response({
+                        "requires_password": True,
+                        "is_admin": True,
+                        "becado": {
+                            "id": becado.id,
+                            "nombre": usuario.first_name or usuario.username,
+                            "dni": becado.dni,
+                        },
+                        "msg": "Usuario admin requiere contraseña"
+                    }, status=status.HTTP_403_FORBIDDEN)
+
+                if not usuario.check_password(password_recibido):
+                    return Response({
+                        "error": "Contraseña incorrecta",
+                        "requires_password": True,
+                        "is_admin": True,
+                    }, status=status.HTTP_401_UNAUTHORIZED)
+
+            if not es_admin:
+                hoy = timezone.now().date()
+                asistencia_existente = Asistencia.objects.filter(
+                    becado=becado,
+                    entrada__date=hoy,
+                    salida__isnull=True
+                ).exists()
+
+                if not asistencia_existente:
+                    Asistencia.objects.create(becado=becado)
+                    mensaje_fichaje = "Asistencia registrada con éxito!"
+                else:
+                    mensaje_fichaje = "Ya tenes una asistencia activa de hoy"
+            else:
+                mensaje_fichaje = "Acceso admin autorizado"
+
             token = AccessToken.for_user(usuario)
-            
+
             return Response({
                 "token": str(token),
                 "becado": {
                     "id": becado.id,
                     "nombre": usuario.first_name or usuario.username,
-                    "dni": becado.dni
+                    "dni": becado.dni,
                 },
-                "msg": mensaje_fichaje
+                "msg": mensaje_fichaje,
+                "is_admin": es_admin,
+                "requires_password": False,
             }, status=status.HTTP_200_OK)
-            
+
         except PerfilBecado.DoesNotExist:
             return Response({"error": "No existe ningún becado/a con ese DNI"}, status=status.HTTP_404_NOT_FOUND)

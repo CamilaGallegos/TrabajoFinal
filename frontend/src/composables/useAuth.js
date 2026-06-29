@@ -7,6 +7,9 @@ export function useAuth(options = {}) {
   const STORAGE_SESIONES = 'sigfo_sesiones'
 
   const dniInput = ref('')
+  const passwordInput = ref('')
+  const requierePassword = ref(false)
+  const loginAdmin = ref(false)
   const sesionesActivas = ref([])
   const sesionActivaId = ref(null)
   const isAuthenticated = computed(() => sesionesActivas.value.length > 0)
@@ -90,6 +93,9 @@ export function useAuth(options = {}) {
       localStorage.removeItem('sigfo_becado')
       localStorage.removeItem(STORAGE_SESIONES)
       dniInput.value = ''
+      passwordInput.value = ''
+      requierePassword.value = false
+      loginAdmin.value = false
       if (expirada) {
         errorMensaje.value = 'Una sesion expiro. Vuelve a ingresar DNI para continuar.'
       }
@@ -122,6 +128,9 @@ export function useAuth(options = {}) {
     token.value = ''
     setAuthToken('')
     dniInput.value = ''
+    passwordInput.value = ''
+    requierePassword.value = false
+    loginAdmin.value = false
     localStorage.removeItem('sigfo_token')
     localStorage.removeItem('sigfo_becado')
     localStorage.removeItem(STORAGE_SESIONES)
@@ -186,7 +195,15 @@ export function useAuth(options = {}) {
     try {
       const respuesta = await axios.post('http://localhost:8000/api/fichaje/entrada/', {
         dni: dniInput.value,
+        password: passwordInput.value,
       })
+
+      if (respuesta.data.requires_password) {
+        requierePassword.value = true
+        loginAdmin.value = Boolean(respuesta.data.is_admin)
+        errorMensaje.value = respuesta.data.msg || 'Usuario admin requiere contraseña'
+        return false
+      }
 
       const idSesion = String(respuesta.data.becado.id)
       const tokenNuevo = respuesta.data.token
@@ -213,6 +230,9 @@ export function useAuth(options = {}) {
       localStorage.setItem('sigfo_token', tokenNuevo)
       localStorage.setItem('sigfo_becado', JSON.stringify(respuesta.data.becado))
       dniInput.value = ''
+      passwordInput.value = ''
+      requierePassword.value = false
+      loginAdmin.value = false
 
       if (onLoginSuccess) {
         await onLoginSuccess()
@@ -220,7 +240,11 @@ export function useAuth(options = {}) {
 
       return true
     } catch (error) {
-      if (error.response && error.response.status === 404) {
+      if (error.response?.status === 403 || error.response?.status === 401) {
+        requierePassword.value = true
+        loginAdmin.value = Boolean(error.response?.data?.is_admin)
+        errorMensaje.value = error.response?.data?.error || 'Usuario admin requiere contraseña'
+      } else if (error.response && error.response.status === 404) {
         errorMensaje.value = 'El DNI ingresado no corresponde a un becado/a activo/a.'
       } else {
         errorMensaje.value = 'Error al iniciar sesion. Por favor, intenta nuevamente.'
@@ -304,6 +328,9 @@ export function useAuth(options = {}) {
 
   return {
     dniInput,
+    passwordInput,
+    requierePassword,
+    loginAdmin,
     sesionesActivas,
     becadosActivos,
     sesionActivaId,

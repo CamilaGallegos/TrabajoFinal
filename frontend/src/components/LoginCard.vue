@@ -4,16 +4,32 @@ const props = defineProps({
     type: String,
     required: true,
   },
+  passwordInput: {
+    type: String,
+    default: '',
+  },
   errorMensaje: {
     type: String,
     default: '',
   },
+  requiresPassword: {
+    type: Boolean,
+    default: false,
+  },
+  isAdmin: {
+    type: Boolean,
+    default: false,
+  },
 })
 
-const emit = defineEmits(['update:dniInput', 'iniciar-sesion'])
+const emit = defineEmits(['update:dniInput', 'update:passwordInput', 'iniciar-sesion'])
 
 const onInput = (event) => {
   emit('update:dniInput', event.target.value)
+}
+
+const onPasswordInput = (event) => {
+  emit('update:passwordInput', event.target.value)
 }
 
 const onIniciar = () => {
@@ -35,6 +51,18 @@ const onIniciar = () => {
         @input="onInput"
         @keyup.enter="onIniciar"
       />
+    </div>
+
+    <div v-if="props.requiresPassword" class="login-input-wrap">
+      <input
+        :value="props.passwordInput"
+        type="password"
+        placeholder="Contraseña de administrador"
+        class="login-input"
+        @input="onPasswordInput"
+        @keyup.enter="onIniciar"
+      />
+      <p v-if="props.isAdmin" class="muted">Acceso administrador/a</p>
     </div>
 
     <button class="btn-primary" @click="onIniciar">Ingresar</button>

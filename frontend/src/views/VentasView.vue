@@ -464,7 +464,7 @@ const irAlHistorial = async () => {
             Admin dashboard
           </button>
           <button @click="cerrarSesion" class="btn-danger">Cerrar Sesión Actual</button>
-          <button @click="cerrarTodasLasSesiones" class="btn-danger btn-danger--secondary">Cerrar Todas</button>
+          <button v-if="!esAdmin" @click="cerrarTodasLasSesiones" class="btn-danger btn-danger--secondary">Cerrar Todas</button>
         </div>
       </header>
 

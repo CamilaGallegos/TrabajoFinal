@@ -57,7 +57,7 @@ const onIniciar = () => {
       <input
         :value="props.passwordInput"
         type="password"
-        placeholder="Contraseña de administrador"
+        placeholder="Contraseña admin"
         class="login-input"
         @input="onPasswordInput"
         @keyup.enter="onIniciar"

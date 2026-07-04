@@ -1,12 +1,12 @@
 import { computed, ref } from 'vue'
 import axios from 'axios'
 
-export function useCatalogo() {
-  const productos = ref([])
-  const cuentasAbiertas = ref([])
-  const busquedaLibreria = ref('')
-  const cargandoProductos = ref(false)
+const productos = ref([])
+const cuentasAbiertas = ref([])
+const busquedaLibreria = ref('')
+const cargandoProductos = ref(false)
 
+export function useCatalogo() {
   const bloquesServicios = [
     {
       titulo: 'BLANCO Y NEGRO',
@@ -56,6 +56,10 @@ export function useCatalogo() {
   })
 
   const obtenerProductos = async () => {
+    if (productos.value.length > 0) {
+      return productos.value
+    }
+
     cargandoProductos.value = true
     try {
       const respuesta = await axios.get('http://localhost:8000/api/productos/')

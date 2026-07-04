@@ -12,10 +12,26 @@ class CategoriaSerializer(serializers.ModelSerializer):
 
 class ProductoSerializer(serializers.ModelSerializer):
     categoria_nombre = serializers.ReadOnlyField(source='categoria.nombre')
+    categoria = serializers.PrimaryKeyRelatedField(
+        queryset=Categoria.objects.all(),
+        required=False,
+        allow_null=True
+    )
 
     class Meta:
         model = Producto
-        fields = ['id', 'nombre', 'precio', 'stock', 'es_servicio', 'categoria', 'categoria_nombre']
+        fields = ['id', 'nombre', 'precio', 'stock', 'es_servicio', 'categoria', 'categoria_nombre', 'activo']
+
+    def create(self, validated_data):
+        # Si no se proporciona categoría, usar o crear la categoría por defecto "General"
+        if 'categoria' not in validated_data or validated_data['categoria'] is None:
+            categoria_default, _ = Categoria.objects.get_or_create(nombre='General')
+            validated_data['categoria'] = categoria_default
+        return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        # Permitir actualizar campos, incluido 'activo'
+        return super().update(instance, validated_data)
 
 
 class CuentaAbiertaSerializer(serializers.ModelSerializer):

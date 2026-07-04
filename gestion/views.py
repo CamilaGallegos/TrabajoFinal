@@ -17,8 +17,20 @@ from .serializers import (
 )
 
 class ProductoViewSet(viewsets.ModelViewSet):
-    queryset = Producto.objects.all()
+    # List only active products by default
+    queryset = Producto.objects.filter(activo=True)
     serializer_class = ProductoSerializer
+
+    def get_queryset(self):
+        # For list operations return only activos; other actions already use the same queryset
+        return Producto.objects.filter(activo=True)
+
+    def destroy(self, request, *args, **kwargs):
+        # Soft-delete: marcar 'activo' a False en lugar de borrar físicamente
+        instance = self.get_object()
+        instance.activo = False
+        instance.save(update_fields=['activo'])
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class CuentaAbiertaViewSet(viewsets.ReadOnlyModelViewSet):

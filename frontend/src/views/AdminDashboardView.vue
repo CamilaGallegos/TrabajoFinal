@@ -1,21 +1,31 @@
 <script setup>
-import { computed, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import axios from 'axios'
 
 const router = useRouter()
-const activeSection = ref('inicio')
+const route = useRoute()
 
 const secciones = [
-  { id: 'inicio', label: 'Inicio' },
-  { id: 'stock', label: 'Stock' },
-  { id: 'historial', label: 'Historial de ventas' },
-  { id: 'reportes', label: 'Reportes' },
+  { id: 'inicio', label: 'Inicio', route: 'admin-home' },
+  { id: 'stock', label: 'Stock', route: 'admin-stock' },
+  { id: 'historial', label: 'Historial de ventas', route: 'admin-history' },
+  { id: 'reportes', label: 'Reportes', route: 'admin-reports' },
 ]
 
-const seleccionarSeccion = (id) => {
-  activeSection.value = id
+const seleccionarSeccion = (item) => {
+  router.push({ name: item.route })
 }
+
+const activeSection = computed(() => {
+  const mapping = {
+    'admin-home': 'inicio',
+    'admin-stock': 'stock',
+    'admin-history': 'historial',
+    'admin-reports': 'reportes',
+  }
+  return mapping[route.name] || 'inicio'
+})
 
 const sectionLabel = computed(() => {
   return secciones.find((item) => item.id === activeSection.value)?.label || 'Inicio'
@@ -62,32 +72,14 @@ const cerrarSesion = () => {
         :key="item.id"
         type="button"
         :class="['nav-tab', { active: item.id === activeSection }]"
-        @click="seleccionarSeccion(item.id)"
+        @click="seleccionarSeccion(item)"
       >
         {{ item.label }}
       </button>
     </section>
 
     <section class="admin-content">
-      <article class="content-box" v-if="activeSection === 'inicio'">
-        <h2>Inicio</h2>
-        <p>inicio</p>
-      </article>
-
-      <article class="content-box" v-if="activeSection === 'stock'">
-        <h2>Stock</h2>
-        <p>stock</p>
-      </article>
-
-      <article class="content-box" v-if="activeSection === 'historial'">
-        <h2>Historial de ventas</h2>
-        <p>historial</p>
-      </article>
-
-      <article class="content-box" v-if="activeSection === 'reportes'">
-        <h2>Reportes</h2>
-        <p>reportes</p>
-      </article>
+      <router-view />
     </section>
   </div>
 </template>

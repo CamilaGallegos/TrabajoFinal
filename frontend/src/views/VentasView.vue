@@ -397,6 +397,14 @@ const volverAlPanel = () => {
   router.push({ name: 'panel' })
 }
 
+const irAlAdminDashboard = () => {
+  if (!esAdmin.value) {
+    return
+  }
+  localStorage.setItem('sigfo_role', 'admin')
+  router.push('/admin-dashboard')
+}
+
 const irAlHistorial = async () => {
   router.push({ name: 'historial' })
   if (ventasRecientes.value.length === 0 && !cargandoVentas.value) {
@@ -460,7 +468,7 @@ const irAlHistorial = async () => {
             />
             <button type="button" class="btn-add" @click="agregarBecadoActivo">Agregar</button>
           </div>
-          <button v-if="esAdmin" type="button" class="btn-add" @click="router.push({ name: 'admin-dashboard' })">
+          <button v-if="esAdmin" type="button" class="btn-add" @click="irAlAdminDashboard">
             Admin dashboard
           </button>
           <button @click="cerrarSesion" class="btn-danger">Cerrar Sesión Actual</button>

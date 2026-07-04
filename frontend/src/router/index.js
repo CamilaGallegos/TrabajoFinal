@@ -1,6 +1,10 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import VentasView from '../views/VentasView.vue'
 import AdminDashboardView from '../views/AdminDashboardView.vue'
+import AdminStockView from '../views/AdminStockView.vue'
+import AdminHomeView from '../views/AdminHomeView.vue'
+import AdminHistoryView from '../views/AdminHistoryView.vue'
+import AdminReportsView from '../views/AdminReportsView.vue'
 
 const routes = [
   {
@@ -26,9 +30,30 @@ const routes = [
   },
   {
     path: '/admin-dashboard',
-    name: 'admin-dashboard',
     component: AdminDashboardView,
     meta: { requiresAuth: true, requiresAdmin: true },
+    children: [
+      {
+        path: '',
+        name: 'admin-home',
+        component: AdminHomeView,
+      },
+      {
+        path: 'stock',
+        name: 'admin-stock',
+        component: AdminStockView,
+      },
+      {
+        path: 'historial',
+        name: 'admin-history',
+        component: AdminHistoryView,
+      },
+      {
+        path: 'reportes',
+        name: 'admin-reports',
+        component: AdminReportsView,
+      },
+    ],
   },
   {
     path: '/:pathMatch(.*)*',

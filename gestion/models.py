@@ -11,6 +11,7 @@ class Producto(models.Model):
     nombre = models.CharField(max_length=200)
     precio = models.DecimalField(max_digits=10, decimal_places=2)
     stock = models.IntegerField(null=True, blank=True)
+    activo = models.BooleanField(default=True)
     es_servicio = models.BooleanField(default=False)
 
     def __str__(self):

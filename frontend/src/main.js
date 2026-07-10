@@ -1,6 +1,29 @@
 import { createApp } from 'vue'
+import axios from 'axios'
 import './style.css'
 import App from './App.vue'
 import router from './router'
+
+// al recargar la app, restaura el token guardado en localStorage y lo setea en axios para que las primeras requests salgan autenticadas
+const restaurarAuthPersistida = () => {
+	const sesionesRaw = localStorage.getItem('sigfo_sesiones')
+	if (sesionesRaw) {
+		try {
+			const sesiones = JSON.parse(sesionesRaw)
+			if (Array.isArray(sesiones) && sesiones.length > 0 && sesiones[0]?.token) {
+				axios.defaults.headers.common.Authorization = `Bearer ${sesiones[0].token}`
+				return
+			}
+		} catch {
+		}
+	}
+
+	const tokenGuardado = localStorage.getItem('sigfo_token')
+	if (tokenGuardado) {
+		axios.defaults.headers.common.Authorization = `Bearer ${tokenGuardado}`
+	}
+}
+
+restaurarAuthPersistida()
 
 createApp(App).use(router).mount('#app')

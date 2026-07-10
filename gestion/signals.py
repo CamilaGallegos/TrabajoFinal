@@ -57,10 +57,13 @@ def asignar_precio_unitario(sender, instance, **kwargs):
 #auditoria
 @receiver(pre_save, sender=Venta)
 def auditar_cambios_venta(sender, instance, **kwargs):
+    if getattr(instance, '_skip_audit_signal', False):
+        return
+
     if instance.pk:
         try:
             old_instance = Venta.objects.get(pk=instance.pk)
-            
+
             if old_instance.total != instance.total:
                 AuditoriaVenta.objects.create(
                     venta=instance,

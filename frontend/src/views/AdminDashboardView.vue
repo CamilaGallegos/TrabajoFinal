@@ -10,6 +10,7 @@ const secciones = [
   { id: 'inicio', label: 'Inicio', route: 'admin-home' },
   { id: 'stock', label: 'Stock', route: 'admin-stock' },
   { id: 'historial', label: 'Historial de ventas', route: 'admin-history' },
+  { id: 'auditoria', label: 'Auditoría', route: 'admin-audit' },
   { id: 'reportes', label: 'Reportes', route: 'admin-reports' },
 ]
 
@@ -22,6 +23,7 @@ const activeSection = computed(() => {
     'admin-home': 'inicio',
     'admin-stock': 'stock',
     'admin-history': 'historial',
+    'admin-audit': 'auditoria',
     'admin-reports': 'reportes',
   }
   return mapping[route.name] || 'inicio'

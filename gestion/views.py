@@ -7,13 +7,14 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import AccessToken
 
-from .models import Producto, PerfilBecado, Asistencia, CuentaAbierta, Venta
+from .models import Producto, PerfilBecado, Asistencia, CuentaAbierta, Venta, AuditoriaVenta
 from .serializers import (
     ProductoSerializer,
     CuentaAbiertaSerializer,
     VentaCreateSerializer,
     VentaUpdateSerializer,
     VentaSerializer,
+    AuditoriaVentaSerializer,
 )
 
 class ProductoViewSet(viewsets.ModelViewSet):
@@ -144,3 +145,16 @@ class FichajeEntradaView(APIView):
 
         except PerfilBecado.DoesNotExist:
             return Response({"error": "No existe ningún becado/a con ese DNI"}, status=status.HTTP_404_NOT_FOUND)
+        except PerfilBecado.DoesNotExist:
+            return Response({"error": "No existe ningún becado/a con ese DNI"}, status=status.HTTP_404_NOT_FOUND)
+
+class AuditoriaVentaViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = AuditoriaVenta.objects.select_related('usuario_corrector', 'venta').all().order_by('-fecha_correccion')
+    serializer_class = AuditoriaVentaSerializer
+
+    def get_queryset(self):
+        venta_id = self.request.query_params.get('venta_id')
+        queryset = AuditoriaVenta.objects.select_related('usuario_corrector', 'venta').order_by('-fecha_correccion')
+        if venta_id:
+            queryset = queryset.filter(venta_id=venta_id)
+        return queryset

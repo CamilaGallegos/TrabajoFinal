@@ -188,6 +188,37 @@ class VentaUpdateSerializer(serializers.Serializer):
 
         return attrs
 
+    def _build_audit_entry(self, snapshot_anterior, snapshot_nuevo):
+        cambios = []
+
+        for campo, valor_anterior in snapshot_anterior.items():
+            valor_nuevo = snapshot_nuevo[campo]
+            if valor_anterior != valor_nuevo:
+                cambios.append((campo, valor_anterior, valor_nuevo))
+
+        if not cambios:
+            return None
+
+        if len(cambios) == 1:
+            campo_modificado, valor_anterior, valor_nuevo = cambios[0]
+            return {
+                'campo_modificado': campo_modificado,
+                'valor_anterior': str(valor_anterior),
+                'valor_nuevo': str(valor_nuevo),
+            }
+
+        return {
+            'campo_modificado': 'Varios campos',
+            'valor_anterior': ' | '.join(
+                f'{campo}={valor_anterior}'
+                for campo, valor_anterior, _ in cambios
+            ),
+            'valor_nuevo': ' | '.join(
+                f'{campo}={valor_nuevo}'
+                for campo, _, valor_nuevo in cambios
+            ),
+        }
+
     @transaction.atomic
     def update(self, instance, validated_data):
         request = self.context['request']
@@ -264,6 +295,7 @@ class VentaUpdateSerializer(serializers.Serializer):
         instance.monto_transferencia = monto_transferencia
         instance.total = total_nuevo
         instance.cuenta_abierta = validated_data.get('cuenta_abierta')
+        instance._skip_audit_signal = True
         instance.save(update_fields=['tipo_pago', 'monto_efectivo', 'monto_transferencia', 'total', 'cuenta_abierta'])
 
         instance.detalles.all().delete()
@@ -294,19 +326,16 @@ class VentaUpdateSerializer(serializers.Serializer):
             ),
         }
 
-        for campo in snapshot_anterior:
-            valor_anterior = snapshot_anterior[campo]
-            valor_nuevo = snapshot_nuevo[campo]
-            if valor_anterior != valor_nuevo:
-                AuditoriaVenta.objects.create(
-                    venta=instance,
-                    usuario_corrector=request.user,
-                    campo_modificado=campo,
-                    valor_anterior=valor_anterior,
-                    valor_nuevo=valor_nuevo,
-                    motivo=motivo,
-                )
-
+        audit_entry = self._build_audit_entry(snapshot_anterior, snapshot_nuevo)
+        if audit_entry:
+            AuditoriaVenta.objects.create(
+                venta=instance,
+                usuario_corrector=request.user,
+                campo_modificado=audit_entry['campo_modificado'],
+                valor_anterior=audit_entry['valor_anterior'],
+                valor_nuevo=audit_entry['valor_nuevo'],
+                motivo=motivo,
+            )
         return instance
 
 
@@ -339,3 +368,13 @@ class VentaSerializer(serializers.ModelSerializer):
             }
             for detalle in obj.detalles.select_related('producto').all()
         ]
+
+class AuditoriaVentaSerializer(serializers.ModelSerializer):
+    usuario_nombre = serializers.CharField(source='usuario_corrector.get_full_name', read_only=True)
+    venta_id = serializers.PrimaryKeyRelatedField(source='venta', read_only=True)
+    becado_nombre = serializers.CharField(source='venta.becado.user.first_name', read_only=True)
+
+    class Meta:
+        model = AuditoriaVenta
+        fields = ['id', 'venta_id', 'usuario_corrector', 'usuario_nombre', 'becado_nombre', 'fecha_correccion', 'campo_modificado', 'valor_anterior', 'valor_nuevo', 'motivo']
+        read_only_fields = ['id', 'usuario_corrector', 'fecha_correccion']

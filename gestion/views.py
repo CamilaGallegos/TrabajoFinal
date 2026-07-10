@@ -1,5 +1,6 @@
 from django.utils import timezone
 from datetime import timedelta
+from django.db.models import Q
 from rest_framework import mixins, viewsets, status
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.permissions import AllowAny
@@ -147,6 +148,49 @@ class FichajeEntradaView(APIView):
             return Response({"error": "No existe ningún becado/a con ese DNI"}, status=status.HTTP_404_NOT_FOUND)
         except PerfilBecado.DoesNotExist:
             return Response({"error": "No existe ningún becado/a con ese DNI"}, status=status.HTTP_404_NOT_FOUND)
+
+
+class ActividadSesionesView(APIView):
+    def get(self, request):
+        limite = timezone.now() - timedelta(hours=48)
+
+        asistencias = Asistencia.objects.select_related('becado__user').filter(
+            Q(salida__isnull=True) | Q(entrada__gte=limite) | Q(salida__gte=limite)
+        ).order_by('becado_id', '-entrada')
+
+        ultimas_por_becado = {}
+        for asistencia in asistencias:
+            if asistencia.becado_id not in ultimas_por_becado:
+                ultimas_por_becado[asistencia.becado_id] = asistencia
+
+        resultado = []
+        for asistencia in ultimas_por_becado.values():
+            usuario = asistencia.becado.user
+            nombre_completo = f"{usuario.first_name} {usuario.last_name}".strip() or usuario.username
+            esta_activo = asistencia.salida is None
+            ultima_actividad = asistencia.entrada if esta_activo else asistencia.salida
+
+            if not esta_activo and (not ultima_actividad or ultima_actividad < limite):
+                continue
+
+            resultado.append({
+                'becado_id': asistencia.becado_id,
+                'nombre_usuario': nombre_completo,
+                'estado': 'activo' if esta_activo else 'cerrada',
+                'ultima_actividad': ultima_actividad.isoformat() if ultima_actividad else None,
+                'entrada': asistencia.entrada.isoformat() if asistencia.entrada else None,
+                'salida': asistencia.salida.isoformat() if asistencia.salida else None,
+            })
+
+        resultado.sort(
+            key=lambda item: (
+                item['estado'] != 'activo',
+                item['ultima_actividad'] or '',
+            ),
+            reverse=False,
+        )
+
+        return Response(resultado)
 
 class AuditoriaVentaViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = AuditoriaVenta.objects.select_related('usuario_corrector', 'venta').all().order_by('-fecha_correccion')

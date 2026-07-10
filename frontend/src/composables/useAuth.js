@@ -50,6 +50,22 @@ export function useAuth(options = {}) {
 
   const esAdmin = computed(() => rolActual.value === 'admin')
 
+  const obtenerSesionInicial = (sesiones) => {
+    if (!Array.isArray(sesiones) || sesiones.length === 0) {
+      return null
+    }
+
+    const adminMode = localStorage.getItem('sigfo_role') === 'admin'
+    if (adminMode) {
+      const sesionAdmin = sesiones.find((sesion) => obtenerRolDeSesion(sesion) === 'admin')
+      if (sesionAdmin) {
+        return sesionAdmin
+      }
+    }
+
+    return sesiones[0]
+  }
+
   const setAuthToken = (jwtToken) => {
     if (jwtToken) {
       axios.defaults.headers.common.Authorization = `Bearer ${jwtToken}`
@@ -142,8 +158,11 @@ export function useAuth(options = {}) {
     }
 
     if (!sesionesActivas.value.some((sesion) => sesion.id === sesionActivaId.value)) {
-      sesionActivaId.value = sesionesActivas.value[0].id
-      infoMensaje.value = `Sesion activa: ${sesionesActivas.value[0].becado.nombre}`
+      const sesionInicial = obtenerSesionInicial(sesionesActivas.value)
+      sesionActivaId.value = sesionInicial?.id || null
+      if (sesionInicial?.becado?.nombre) {
+        infoMensaje.value = `Sesion activa: ${sesionInicial.becado.nombre}`
+      }
     }
 
     aplicarAuthDeSesionActiva()
@@ -324,7 +343,8 @@ export function useAuth(options = {}) {
 
           sesionesActivas.value = sesionesValidas
           if (sesionesActivas.value.length > 0) {
-            sesionActivaId.value = sesionesActivas.value[0].id
+            const sesionInicial = obtenerSesionInicial(sesionesActivas.value)
+            sesionActivaId.value = sesionInicial?.id || null
             aplicarAuthDeSesionActiva()
             if (onLoginSuccess) {
               await onLoginSuccess()

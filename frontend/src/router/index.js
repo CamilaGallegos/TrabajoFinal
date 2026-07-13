@@ -3,6 +3,7 @@ import VentasView from '../views/VentasView.vue'
 import AdminDashboardView from '../views/AdminDashboardView.vue'
 import AdminStockView from '../views/AdminStockView.vue'
 import AdminHomeView from '../views/AdminHomeView.vue'
+import AdminAttendanceView from '../views/AdminAttendanceView.vue'
 import AdminHistoryView from '../views/AdminHistoryView.vue'
 import AdminReportsView from '../views/AdminReportsView.vue'
 import AdminAuditView from '../views/AdminAuditView.vue'
@@ -43,6 +44,11 @@ const routes = [
         path: 'stock',
         name: 'admin-stock',
         component: AdminStockView,
+      },
+      {
+        path: 'asistencia',
+        name: 'admin-attendance',
+        component: AdminAttendanceView,
       },
       {
         path: 'historial',

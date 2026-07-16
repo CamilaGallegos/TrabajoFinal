@@ -6,6 +6,7 @@ const resumen = ref({ actual: null, anterior: null, seleccionado: null })
 const mesSeleccionado = ref('')
 const cargando = ref(false)
 const error = ref('')
+const usuariosExpandido = ref({})
 
 const formatearFecha = (fechaIso) => {
   if (!fechaIso) return 'Sin horario'
@@ -42,8 +43,10 @@ const cargarResumen = async () => {
       },
     })
     resumen.value = respuesta.data || { actual: null, anterior: null, seleccionado: null }
+    usuariosExpandido.value = {}
   } catch (err) {
     resumen.value = { actual: null, anterior: null, seleccionado: null }
+    usuariosExpandido.value = {}
     error.value = 'Error al cargar las asistencias'
   } finally {
     cargando.value = false
@@ -76,6 +79,30 @@ const textoSalida = (asistencia) => {
   const mismoMes = entrada.getFullYear() === ahora.getFullYear() && entrada.getMonth() === ahora.getMonth()
   return mismoMes ? 'Activo ahora' : 'Sin cierre'
 }
+
+const claveUsuario = (seccionKey, becadoId) => `${seccionKey}-${becadoId}`
+
+const usuarioEstaExpandido = (seccionKey, becadoId) => Boolean(usuariosExpandido.value[claveUsuario(seccionKey, becadoId)])
+
+const alternarUsuarioExpandido = (seccionKey, becadoId) => {
+  const clave = claveUsuario(seccionKey, becadoId)
+  usuariosExpandido.value[clave] = !usuariosExpandido.value[clave]
+}
+
+const asistenciasOrdenadas = (usuario) => {
+  const asistencias = Array.isArray(usuario.asistencias) ? [...usuario.asistencias] : []
+  return asistencias.sort((a, b) => new Date(b.entrada).getTime() - new Date(a.entrada).getTime())
+}
+
+const asistenciasVisibles = (seccionKey, usuario) => {
+  const asistencias = asistenciasOrdenadas(usuario)
+  if (usuarioEstaExpandido(seccionKey, usuario.becado_id)) {
+    return asistencias
+  }
+  return asistencias.slice(0, 5)
+}
+
+const puedeExpandirUsuario = (usuario) => (usuario.asistencias?.length || 0) > 5
 
 onMounted(() => {
   mesSeleccionado.value = mesActualValor()
@@ -135,13 +162,23 @@ onMounted(() => {
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="asistencia in usuario.asistencias" :key="asistencia.id">
+                <tr v-for="asistencia in asistenciasVisibles(seccion.key, usuario)" :key="asistencia.id">
                   <td>{{ formatearFecha(asistencia.entrada) }}</td>
                   <td>{{ textoSalida(asistencia) }}</td>
                   <td class="right">{{ totalHorasTexto(asistencia.horas) }}</td>
                 </tr>
               </tbody>
             </table>
+
+            <div v-if="puedeExpandirUsuario(usuario)" class="usuario-footer">
+              <button
+                type="button"
+                class="btn-link"
+                @click="alternarUsuarioExpandido(seccion.key, usuario.becado_id)"
+              >
+                {{ usuarioEstaExpandido(seccion.key, usuario.becado_id) ? 'Ver menos' : 'Ver más' }}
+              </button>
+            </div>
           </article>
         </div>
       </article>
@@ -296,6 +333,27 @@ onMounted(() => {
   margin: 0;
   color: #64748b;
   font-size: 13px;
+}
+
+.usuario-footer {
+  margin-top: 10px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.btn-link {
+  border: 0;
+  background: transparent;
+  color: #0578af;
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+  padding: 4px 0;
+}
+
+.btn-link:hover {
+  color: #046892;
+  text-decoration: underline;
 }
 
 .asistencias-table {

@@ -1,6 +1,7 @@
 from django.utils import timezone
 from datetime import datetime, timedelta
-from django.db.models import Q
+from django.db.models import Count, Q, Sum
+from django.db.models.functions import ExtractHour, ExtractWeekDay
 from rest_framework import mixins, viewsets, status
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.permissions import AllowAny
@@ -8,7 +9,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import AccessToken
 
-from .models import Producto, PerfilBecado, Asistencia, CuentaAbierta, Venta, AuditoriaVenta
+from .models import Producto, PerfilBecado, Asistencia, CuentaAbierta, Venta, DetalleVenta, AuditoriaVenta
 from .serializers import (
     ProductoSerializer,
     CuentaAbiertaSerializer,
@@ -347,6 +348,148 @@ class AsistenciaResumenView(APIView):
             'seleccionado': self._build_month_payload(year, month, f'{month:02d}/{year:04d}'),
         }
 
+        return Response(response)
+
+
+class ReporteDashboardResumenView(APIView):
+    WEEKDAY_ORDER = [1, 2, 3, 4, 5, 6, 7]
+    WEEKDAY_LABELS = {
+        1: 'Lunes',
+        2: 'Martes',
+        3: 'Miércoles',
+        4: 'Jueves',
+        5: 'Viernes',
+        6: 'Sábado',
+        7: 'Domingo',
+    }
+    TIPO_PAGO_LABELS = {
+        Venta.TIPO_PAGO_EFECTIVO: 'Efectivo',
+        Venta.TIPO_PAGO_TRANSFERENCIA: 'Transferencia',
+        Venta.TIPO_PAGO_COMBINADO: 'Combinado',
+        Venta.TIPO_PAGO_CUENTA_ABIERTA: 'Cuenta Abierta',
+    }
+
+    def _bool_query_param(self, value, default=False):
+        if value is None:
+            return default
+        return str(value).strip().lower() in {'1', 'true', 't', 'si', 'yes', 'y'}
+
+    def _parse_date(self, value):
+        if not value:
+            return None
+        try:
+            return datetime.strptime(value, '%Y-%m-%d').date()
+        except ValueError:
+            return None
+
+    def _default_date_range(self):
+        now = timezone.localtime(timezone.now())
+        start = now.date().replace(day=1)
+        return start, now.date()
+
+    def _date_range_from_query(self, request):
+        fecha_desde = self._parse_date(request.query_params.get('fecha_desde'))
+        fecha_hasta = self._parse_date(request.query_params.get('fecha_hasta'))
+
+        if not fecha_desde and not fecha_hasta:
+            fecha_desde, fecha_hasta = self._default_date_range()
+        elif fecha_desde and not fecha_hasta:
+            fecha_hasta = fecha_desde
+        elif fecha_hasta and not fecha_desde:
+            fecha_desde = fecha_hasta
+
+        if fecha_desde > fecha_hasta:
+            fecha_desde, fecha_hasta = fecha_hasta, fecha_desde
+
+        tz = timezone.get_current_timezone()
+        inicio = timezone.make_aware(datetime.combine(fecha_desde, datetime.min.time()), tz)
+        fin_exclusivo = timezone.make_aware(datetime.combine(fecha_hasta + timedelta(days=1), datetime.min.time()), tz)
+        return fecha_desde, fecha_hasta, inicio, fin_exclusivo
+
+    def _movimiento_por_dia(self, ventas_qs, incluir_finde):
+        ventas_por_dia = {
+            item['weekday']: item['ventas']
+            for item in ventas_qs.annotate(weekday=ExtractWeekDay('fecha')).values('weekday').annotate(ventas=Count('id'))
+        }
+
+        dias_base = [1, 2, 3, 4, 5] if not incluir_finde else self.WEEKDAY_ORDER
+        return [
+            {
+                'dia': self.WEEKDAY_LABELS[dia_num],
+                'ventas': int(ventas_por_dia.get(dia_num, 0)),
+            }
+            for dia_num in dias_base
+        ]
+
+    def _horas_pico(self, ventas_qs):
+        ventas_por_hora = {
+            item['hora']: item['ventas']
+            for item in ventas_qs.annotate(hora=ExtractHour('fecha')).values('hora').annotate(ventas=Count('id'))
+        }
+
+        inicio_hora, fin_hora = 8, 20
+        return [
+            {
+                'hora': f'{hora:02d}:00',
+                'ventas': int(ventas_por_hora.get(hora, 0)),
+            }
+            for hora in range(inicio_hora, fin_hora + 1)
+        ]
+
+    def _preferencia_pago(self, ventas_qs):
+        totales = list(ventas_qs.values('tipo_pago').annotate(transacciones=Count('id')).order_by())
+        total_transacciones = sum(item['transacciones'] for item in totales)
+
+        if total_transacciones == 0:
+            return []
+
+        resultado = []
+        for item in totales:
+            transacciones = int(item['transacciones'])
+            porcentaje = round((transacciones / total_transacciones) * 100, 2)
+            tipo = item['tipo_pago']
+            resultado.append({
+                'metodo': tipo,
+                'label': self.TIPO_PAGO_LABELS.get(tipo, tipo.replace('_', ' ').title()),
+                'transacciones': transacciones,
+                'porcentaje': porcentaje,
+            })
+        return resultado
+
+    def _top_productos(self, inicio, fin_exclusivo):
+        top = (
+            DetalleVenta.objects
+            .filter(venta__fecha__gte=inicio, venta__fecha__lt=fin_exclusivo)
+            .values('producto__nombre')
+            .annotate(unidades=Sum('cantidad'))
+            .order_by('-unidades', 'producto__nombre')[:10]
+        )
+
+        return [
+            {
+                'producto': item['producto__nombre'],
+                'unidades': int(item['unidades'] or 0),
+            }
+            for item in top
+        ]
+
+    def get(self, request):
+        incluir_finde = self._bool_query_param(request.query_params.get('incluir_finde'), default=False)
+        fecha_desde, fecha_hasta, inicio, fin_exclusivo = self._date_range_from_query(request)
+
+        ventas_qs = Venta.objects.filter(fecha__gte=inicio, fecha__lt=fin_exclusivo)
+
+        response = {
+            'filtros': {
+                'fecha_desde': fecha_desde.isoformat(),
+                'fecha_hasta': fecha_hasta.isoformat(),
+                'incluir_finde': incluir_finde,
+            },
+            'movimiento_dia_semana': self._movimiento_por_dia(ventas_qs, incluir_finde),
+            'horas_pico': self._horas_pico(ventas_qs),
+            'preferencia_pago': self._preferencia_pago(ventas_qs),
+            'top_productos': self._top_productos(inicio, fin_exclusivo),
+        }
         return Response(response)
 
 class AuditoriaVentaViewSet(viewsets.ReadOnlyModelViewSet):

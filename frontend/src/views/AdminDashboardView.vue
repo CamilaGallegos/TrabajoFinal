@@ -11,6 +11,7 @@ const secciones = [
   { id: 'asistencia', label: 'Asistencia', route: 'admin-attendance' },
   { id: 'stock', label: 'Stock', route: 'admin-stock' },
   { id: 'historial', label: 'Historial de ventas', route: 'admin-history' },
+  { id: 'cuentas-abiertas', label: 'Cuenta abiertas', route: 'admin-open-accounts' },
   { id: 'auditoria', label: 'Auditoría', route: 'admin-audit' },
   { id: 'reportes', label: 'Reportes', route: 'admin-reports' },
 ]
@@ -25,6 +26,7 @@ const activeSection = computed(() => {
     'admin-attendance': 'asistencia',
     'admin-stock': 'stock',
     'admin-history': 'historial',
+    'admin-open-accounts': 'cuentas-abiertas',
     'admin-audit': 'auditoria',
     'admin-reports': 'reportes',
   }

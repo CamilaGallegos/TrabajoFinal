@@ -7,6 +7,7 @@ import AdminAttendanceView from '../views/AdminAttendanceView.vue'
 import AdminHistoryView from '../views/AdminHistoryView.vue'
 import AdminReportsView from '../views/AdminReportsView.vue'
 import AdminAuditView from '../views/AdminAuditView.vue'
+import AdminOpenAccountsView from '../views/AdminOpenAccountsView.vue'
 
 const routes = [
   {
@@ -59,6 +60,11 @@ const routes = [
         path: 'reportes',
         name: 'admin-reports',
         component: AdminReportsView,
+      },
+      {
+        path: 'cuentas-abiertas',
+        name: 'admin-open-accounts',
+        component: AdminOpenAccountsView,
       },
       {
         path: 'auditoria',

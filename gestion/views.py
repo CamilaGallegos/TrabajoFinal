@@ -547,6 +547,92 @@ class ReporteDashboardResumenView(APIView):
         }
         return Response(response)
 
+
+class CuentaAbiertaResumenView(APIView):
+    REPORT_TIMEZONE = ZoneInfo('America/Argentina/Buenos_Aires')
+
+    def _parse_date(self, value):
+        if not value:
+            return None
+        try:
+            return datetime.strptime(value, '%Y-%m-%d').date()
+        except ValueError:
+            return None
+
+    def _format_money(self, value):
+        return round(float(value or 0), 2)
+
+    def get(self, request):
+        fecha_desde_raw = request.query_params.get('fecha_desde')
+        fecha_hasta_raw = request.query_params.get('fecha_hasta')
+        fecha_desde = self._parse_date(fecha_desde_raw)
+        fecha_hasta = self._parse_date(fecha_hasta_raw)
+
+        if fecha_desde and fecha_hasta and fecha_desde > fecha_hasta:
+            fecha_desde, fecha_hasta = fecha_hasta, fecha_desde
+
+        ventas_qs = (
+            Venta.objects
+            .select_related('becado__user', 'cuenta_abierta')
+            .prefetch_related('detalles__producto')
+            .filter(cuenta_abierta__isnull=False)
+            .order_by('cuenta_abierta_id', '-fecha')
+        )
+
+        if fecha_desde:
+            inicio = timezone.make_aware(datetime.combine(fecha_desde, datetime.min.time()), self.REPORT_TIMEZONE)
+            ventas_qs = ventas_qs.filter(fecha__gte=inicio)
+
+        if fecha_hasta:
+            fin_exclusivo = timezone.make_aware(
+                datetime.combine(fecha_hasta + timedelta(days=1), datetime.min.time()),
+                self.REPORT_TIMEZONE,
+            )
+            ventas_qs = ventas_qs.filter(fecha__lt=fin_exclusivo)
+
+        cuentas = list(CuentaAbierta.objects.all().order_by('nombre_departamento'))
+        ventas_por_cuenta = {cuenta.id: [] for cuenta in cuentas}
+
+        for venta in ventas_qs:
+            becado_user = venta.becado.user
+            becado_nombre = (f'{becado_user.first_name} {becado_user.last_name}'.strip() or becado_user.username)
+            ventas_por_cuenta.setdefault(venta.cuenta_abierta_id, []).append({
+                'id': venta.id,
+                'fecha': timezone.localtime(venta.fecha, self.REPORT_TIMEZONE).isoformat(),
+                'total': self._format_money(venta.total),
+                'tipo_pago': venta.tipo_pago,
+                'becado_nombre': becado_nombre,
+                'detalles': [
+                    {
+                        'producto_nombre': detalle.producto.nombre,
+                        'cantidad': detalle.cantidad,
+                        'precio_unitario': self._format_money(detalle.precio_unitario),
+                    }
+                    for detalle in venta.detalles.all()
+                ],
+            })
+
+        resultado_cuentas = []
+        for cuenta in cuentas:
+            ventas = ventas_por_cuenta.get(cuenta.id, [])
+            total_cuenta = sum(venta['total'] for venta in ventas)
+            resultado_cuentas.append({
+                'cuenta_id': cuenta.id,
+                'nombre_departamento': cuenta.nombre_departamento,
+                'responsable': cuenta.responsable,
+                'cantidad_ventas': len(ventas),
+                'total_ventas': round(total_cuenta, 2),
+                'ventas': ventas,
+            })
+
+        return Response({
+            'filtros': {
+                'fecha_desde': fecha_desde.isoformat() if fecha_desde else None,
+                'fecha_hasta': fecha_hasta.isoformat() if fecha_hasta else None,
+            },
+            'cuentas': resultado_cuentas,
+        })
+
 class AuditoriaVentaViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = AuditoriaVenta.objects.select_related('usuario_corrector', 'venta').all().order_by('-fecha_correccion')
     serializer_class = AuditoriaVentaSerializer

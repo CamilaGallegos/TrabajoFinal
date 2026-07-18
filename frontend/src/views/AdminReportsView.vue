@@ -24,6 +24,11 @@ const totalesEfectivoTransferencia = ref([])
 const cargandoTotal = ref(false)
 const errorTotal = ref('')
 
+const mesTop = ref('')
+const topProductos = ref([])
+const cargandoTop = ref(false)
+const errorTop = ref('')
+
 const obtenerMesActual = () => {
   const hoy = new Date()
   const year = hoy.getFullYear()
@@ -110,6 +115,7 @@ const rangoMovimiento = computed(() => obtenerRangoSemana(semanaMovimiento.value
 const rangoHoras = computed(() => obtenerRangoSemana(semanaHoras.value))
 const rangoMetodo = computed(() => obtenerRangoMes(mesMetodo.value))
 const rangoTotal = computed(() => obtenerRangoMes(mesTotal.value))
+const rangoTop = computed(() => obtenerRangoMes(mesTop.value))
 
 const rangoTexto = (rango) => {
   if (!rango.desde || !rango.hasta) {
@@ -122,6 +128,7 @@ const rangoMovimientoTexto = computed(() => rangoTexto(rangoMovimiento.value))
 const rangoHorasTexto = computed(() => rangoTexto(rangoHoras.value))
 const rangoMetodoTexto = computed(() => rangoTexto(rangoMetodo.value))
 const rangoTotalTexto = computed(() => rangoTexto(rangoTotal.value))
+const rangoTopTexto = computed(() => rangoTexto(rangoTop.value))
 
 const consultarResumen = async ({ fechaDesde, fechaHasta, incluirFinde = false }) => {
   const respuesta = await axios.get('http://localhost:8000/api/reportes/dashboard-resumen/', {
@@ -227,6 +234,29 @@ const cargarTotalesEfectivoTransferencia = async () => {
     errorTotal.value = 'No se pudo cargar los totales'
   } finally {
     cargandoTotal.value = false
+  }
+}
+
+const cargarTopProductos = async () => {
+  if (!rangoTop.value.desde || !rangoTop.value.hasta) {
+    errorTop.value = 'Selecciona un mes valido'
+    return
+  }
+
+  cargandoTop.value = true
+  errorTop.value = ''
+
+  try {
+    const data = await consultarResumen({
+      fechaDesde: rangoTop.value.desde,
+      fechaHasta: rangoTop.value.hasta,
+    })
+    topProductos.value = data.top_productos || []
+  } catch (err) {
+    topProductos.value = []
+    errorTop.value = 'No se pudo cargar el top de productos'
+  } finally {
+    cargandoTop.value = false
   }
 }
 
@@ -510,6 +540,75 @@ const totalOptions = computed(() => ({
   },
 }))
 
+const topSeries = computed(() => ([
+  {
+    name: 'Unidades vendidas',
+    data: topProductos.value.map((item) => ({
+      x: item.producto,
+      y: item.unidades || 0,
+    })),
+  },
+]))
+
+const topOptions = computed(() => ({
+  chart: {
+    id: 'top-10-productos',
+    toolbar: { show: false },
+    fontFamily: 'Poppins, sans-serif',
+  },
+  colors: ['#3B82F6'],
+  plotOptions: {
+    bar: {
+      horizontal: true,
+      borderRadius: 6,
+      barHeight: '70%',
+      dataLabels: {
+        position: 'right',
+      },
+    },
+  },
+  dataLabels: {
+    enabled: true,
+    style: {
+      colors: ['#0f172a'],
+      fontSize: '11px',
+      fontWeight: '600',
+    },
+  },
+  xaxis: {
+    min: 0,
+    title: {
+      text: 'Unidades vendidas',
+      style: {
+        color: '#475569',
+      },
+    },
+    labels: {
+      style: {
+        colors: '#334155',
+      },
+    },
+  },
+  yaxis: {
+    labels: {
+      style: {
+        colors: '#334155',
+        fontSize: '12px',
+      },
+    },
+  },
+  grid: {
+    strokeDashArray: 4,
+    borderColor: '#e2e8f0',
+  },
+  tooltip: {
+    theme: 'light',
+    y: {
+      formatter: (valor) => `${valor} unidades`,
+    },
+  },
+}))
+
 onMounted(() => {
   const semanaActual = semanaActualIso()
   const mesActual = obtenerMesActual()
@@ -517,10 +616,12 @@ onMounted(() => {
   semanaHoras.value = semanaActual
   mesMetodo.value = mesActual
   mesTotal.value = mesActual
+  mesTop.value = mesActual
   cargarMovimientoSemana()
   cargarHorasSemana()
   cargarMetodosPago()
   cargarTotalesEfectivoTransferencia()
+  cargarTopProductos()
 })
 </script>
 
@@ -675,6 +776,39 @@ onMounted(() => {
           :series="totalSeries"
         />
       </article>
+
+      <article class="chart-card chart-card-full">
+        <header class="chart-title">
+          <h3>Top 10 productos y servicios mas vendidos</h3>
+        </header>
+
+        <div class="reports-actions chart-actions">
+          <label>
+            Mes
+            <input v-model="mesTop" type="month" />
+          </label>
+
+          <button type="button" class="btn-refresh" @click="cargarTopProductos">
+            Actualizar
+          </button>
+
+          <small v-if="rangoTopTexto" class="week-range">Rango: {{ rangoTopTexto }}</small>
+        </div>
+
+        <div v-if="cargandoTop" class="estado-msg">Cargando top 10...</div>
+        <div v-else-if="errorTop" class="estado-msg error">{{ errorTop }}</div>
+        <div v-else-if="topProductos.length === 0" class="estado-msg">
+          No hay datos de ventas para el mes seleccionado
+        </div>
+
+        <apexchart
+          v-else
+          type="bar"
+          height="500"
+          :options="topOptions"
+          :series="topSeries"
+        />
+      </article>
     </section>
   </div>
 </template>
@@ -724,7 +858,8 @@ onMounted(() => {
 }
 
 .reports-actions input[type='date'],
-.reports-actions input[type='week'] {
+.reports-actions input[type='week'],
+.reports-actions input[type='month'] {
   border: 1px solid #cbd5e1;
   border-radius: 10px;
   padding: 8px 10px;
@@ -784,6 +919,10 @@ onMounted(() => {
   border-radius: 16px;
   padding: 18px;
   background: #ffffff;
+}
+
+.chart-card-full {
+  grid-column: 1 / -1;
 }
 
 .chart-title h3 {

@@ -14,6 +14,45 @@ const flujoDiaHora = ref([])
 const cargandoHoras = ref(false)
 const errorHoras = ref('')
 
+const mesMetodo = ref('')
+const preferenciaMetodo = ref([])
+const cargandoMetodo = ref(false)
+const errorMetodo = ref('')
+
+const mesTotal = ref('')
+const totalesEfectivoTransferencia = ref([])
+const cargandoTotal = ref(false)
+const errorTotal = ref('')
+
+const obtenerMesActual = () => {
+  const hoy = new Date()
+  const year = hoy.getFullYear()
+  const month = String(hoy.getMonth() + 1).padStart(2, '0')
+  return `${year}-${month}`
+}
+
+const obtenerRangoMes = (valor) => {
+  if (!valor || !valor.includes('-')) {
+    return { desde: '', hasta: '' }
+  }
+
+  const [yearPart, monthPart] = valor.split('-')
+  const year = Number(yearPart)
+  const month = Number(monthPart)
+
+  if (!year || !month || month < 1 || month > 12) {
+    return { desde: '', hasta: '' }
+  }
+
+  const primerDia = new Date(Date.UTC(year, month - 1, 1))
+  const ultimoDia = new Date(Date.UTC(year, month, 0))
+
+  return {
+    desde: formatearFechaIso(primerDia),
+    hasta: formatearFechaIso(ultimoDia),
+  }
+}
+
 const formatearFechaIso = (fecha) => {
   const year = fecha.getUTCFullYear()
   const month = String(fecha.getUTCMonth() + 1).padStart(2, '0')
@@ -69,6 +108,8 @@ const obtenerRangoSemana = (valor) => {
 
 const rangoMovimiento = computed(() => obtenerRangoSemana(semanaMovimiento.value))
 const rangoHoras = computed(() => obtenerRangoSemana(semanaHoras.value))
+const rangoMetodo = computed(() => obtenerRangoMes(mesMetodo.value))
+const rangoTotal = computed(() => obtenerRangoMes(mesTotal.value))
 
 const rangoTexto = (rango) => {
   if (!rango.desde || !rango.hasta) {
@@ -79,6 +120,8 @@ const rangoTexto = (rango) => {
 
 const rangoMovimientoTexto = computed(() => rangoTexto(rangoMovimiento.value))
 const rangoHorasTexto = computed(() => rangoTexto(rangoHoras.value))
+const rangoMetodoTexto = computed(() => rangoTexto(rangoMetodo.value))
+const rangoTotalTexto = computed(() => rangoTexto(rangoTotal.value))
 
 const consultarResumen = async ({ fechaDesde, fechaHasta, incluirFinde = false }) => {
   const respuesta = await axios.get('http://localhost:8000/api/reportes/dashboard-resumen/', {
@@ -138,6 +181,52 @@ const cargarHorasSemana = async () => {
     errorHoras.value = 'No se pudo cargar el flujo por dia y hora'
   } finally {
     cargandoHoras.value = false
+  }
+}
+
+const cargarMetodosPago = async () => {
+  if (!rangoMetodo.value.desde || !rangoMetodo.value.hasta) {
+    errorMetodo.value = 'Selecciona un mes valido'
+    return
+  }
+
+  cargandoMetodo.value = true
+  errorMetodo.value = ''
+
+  try {
+    const data = await consultarResumen({
+      fechaDesde: rangoMetodo.value.desde,
+      fechaHasta: rangoMetodo.value.hasta,
+    })
+    preferenciaMetodo.value = data.preferencia_pago || []
+  } catch (err) {
+    preferenciaMetodo.value = []
+    errorMetodo.value = 'No se pudo cargar la preferencia de pago'
+  } finally {
+    cargandoMetodo.value = false
+  }
+}
+
+const cargarTotalesEfectivoTransferencia = async () => {
+  if (!rangoTotal.value.desde || !rangoTotal.value.hasta) {
+    errorTotal.value = 'Selecciona un mes valido'
+    return
+  }
+
+  cargandoTotal.value = true
+  errorTotal.value = ''
+
+  try {
+    const data = await consultarResumen({
+      fechaDesde: rangoTotal.value.desde,
+      fechaHasta: rangoTotal.value.hasta,
+    })
+    totalesEfectivoTransferencia.value = data.totales_efectivo_transferencia || []
+  } catch (err) {
+    totalesEfectivoTransferencia.value = []
+    errorTotal.value = 'No se pudo cargar los totales'
+  } finally {
+    cargandoTotal.value = false
   }
 }
 
@@ -292,12 +381,146 @@ const horasOptions = computed(() => ({
   },
 }))
 
+const metodosSeries = computed(() => preferenciaMetodo.value.map((item) => item.transacciones))
+
+const metodosOptions = computed(() => ({
+  chart: {
+    id: 'preferencia-pago-semana',
+    toolbar: { show: false },
+    fontFamily: 'Poppins, sans-serif',
+  },
+  colors: ['#06D6A0', '#0077B6', '#F59E0B', '#DC2626'],
+  labels: preferenciaMetodo.value.map((item) => item.label),
+  plotOptions: {
+    pie: {
+      donut: {
+        size: '75%',
+        labels: {
+          show: true,
+          name: {
+            show: false,
+          },
+          value: {
+            show: true,
+            fontSize: '13px',
+            color: '#475569',
+            formatter: (valor) => `${valor}`,
+          },
+          total: {
+            show: true,
+            label: 'Total',
+            color: '#0f172a',
+            formatter: () => `${preferenciaMetodo.value.reduce((acc, item) => acc + item.transacciones, 0)} transacciones`,
+          },
+        },
+      },
+    },
+  },
+  dataLabels: {
+    enabled: true,
+    formatter: (valor, { series, seriesIndex }) => {
+      const item = preferenciaMetodo.value[seriesIndex]
+      return item ? `${item.porcentaje.toFixed(1)}%` : '0%'
+    },
+    style: {
+      fontSize: '12px',
+      colors: ['#ffffff'],
+    },
+  },
+  legend: {
+    position: 'bottom',
+    labels: {
+      colors: '#334155',
+    },
+  },
+  tooltip: {
+    theme: 'light',
+    y: {
+      formatter: (valor) => `${valor} transacciones`,
+    },
+  },
+}))
+
+const totalSeries = computed(() => ([
+  {
+    name: 'Monto recaudado',
+    data: totalesEfectivoTransferencia.value.map((item) => item.monto || 0),
+  },
+]))
+
+const totalOptions = computed(() => ({
+  chart: {
+    id: 'total-efectivo-transferencia',
+    toolbar: { show: false },
+    fontFamily: 'Poppins, sans-serif',
+  },
+  colors: ['#06D6A0'],
+  plotOptions: {
+    bar: {
+      borderRadius: 8,
+      columnWidth: '55%',
+      dataLabels: {
+        position: 'top',
+      },
+    },
+  },
+  dataLabels: {
+    enabled: true,
+    offsetY: -20,
+    style: {
+      colors: ['#0f172a'],
+      fontSize: '12px',
+      fontWeight: '600',
+    },
+    formatter: (valor) => `$${valor.toFixed(2)}`,
+  },
+  xaxis: {
+    categories: totalesEfectivoTransferencia.value.map((item) => item.label),
+    labels: {
+      style: {
+        colors: '#334155',
+        fontSize: '12px',
+      },
+    },
+  },
+  yaxis: {
+    min: 0,
+    title: {
+      text: 'Monto ($)',
+      style: {
+        color: '#475569',
+      },
+    },
+    labels: {
+      style: {
+        colors: '#334155',
+      },
+      formatter: (valor) => `$${valor.toFixed(0)}`,
+    },
+  },
+  grid: {
+    strokeDashArray: 4,
+    borderColor: '#e2e8f0',
+  },
+  tooltip: {
+    theme: 'light',
+    y: {
+      formatter: (valor) => `$${valor.toFixed(2)}`,
+    },
+  },
+}))
+
 onMounted(() => {
   const semanaActual = semanaActualIso()
+  const mesActual = obtenerMesActual()
   semanaMovimiento.value = semanaActual
   semanaHoras.value = semanaActual
+  mesMetodo.value = mesActual
+  mesTotal.value = mesActual
   cargarMovimientoSemana()
   cargarHorasSemana()
+  cargarMetodosPago()
+  cargarTotalesEfectivoTransferencia()
 })
 </script>
 
@@ -351,7 +574,7 @@ onMounted(() => {
 
       <article class="chart-card">
         <header class="chart-title">
-          <h3>Flujo por Dia y Hora</h3>
+          <h3>Flujo por dia y hora</h3>
         </header>
 
         <div class="reports-actions chart-actions">
@@ -384,6 +607,72 @@ onMounted(() => {
           height="320"
           :options="horasOptions"
           :series="horasSeries"
+        />
+      </article>
+
+      <article class="chart-card">
+        <header class="chart-title">
+          <h3>Preferencia de metodos de pago</h3>
+        </header>
+
+        <div class="reports-actions chart-actions">
+          <label>
+            Mes
+            <input v-model="mesMetodo" type="month" />
+          </label>
+
+          <button type="button" class="btn-refresh" @click="cargarMetodosPago">
+            Actualizar
+          </button>
+
+          <small v-if="rangoMetodoTexto" class="week-range">Rango: {{ rangoMetodoTexto }}</small>
+        </div>
+
+        <div v-if="cargandoMetodo" class="estado-msg">Cargando metodos de pago...</div>
+        <div v-else-if="errorMetodo" class="estado-msg error">{{ errorMetodo }}</div>
+        <div v-else-if="preferenciaMetodo.length === 0" class="estado-msg">
+          No hay datos de metodos de pago para el mes seleccionado
+        </div>
+
+        <apexchart
+          v-else
+          type="donut"
+          height="340"
+          :options="metodosOptions"
+          :series="metodosSeries"
+        />
+      </article>
+
+      <article class="chart-card">
+        <header class="chart-title">
+          <h3>Total mensual en efectivo y transferencia</h3>
+        </header>
+
+        <div class="reports-actions chart-actions">
+          <label>
+            Mes
+            <input v-model="mesTotal" type="month" />
+          </label>
+
+          <button type="button" class="btn-refresh" @click="cargarTotalesEfectivoTransferencia">
+            Actualizar
+          </button>
+
+          <small v-if="rangoTotalTexto" class="week-range">Rango: {{ rangoTotalTexto }}</small>
+        </div>
+
+        <div v-if="cargandoTotal" class="estado-msg">Cargando totales...</div>
+        <div v-else-if="errorTotal" class="estado-msg error">{{ errorTotal }}</div>
+        <div v-else-if="totalesEfectivoTransferencia.length === 0" class="estado-msg">
+          No hay datos de recaudacion para el mes seleccionad
+        </div>
+
+        <apexchart
+          v-else
+          type="bar"
+          height="320"
+          :options="totalOptions"
+          :series="totalSeries"
         />
       </article>
     </section>
@@ -487,6 +776,7 @@ onMounted(() => {
   display: grid;
   gap: 14px;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-auto-rows: max-content;
 }
 
 .chart-card {
@@ -507,13 +797,15 @@ onMounted(() => {
   font-size: 14px;
 }
 
+@media (max-width: 1200px) {
+  .chart-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 @media (max-width: 900px) {
   .reports-header {
     flex-direction: column;
-  }
-
-  .chart-grid {
-    grid-template-columns: 1fr;
   }
 }
 </style>

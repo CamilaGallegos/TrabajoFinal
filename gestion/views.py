@@ -489,6 +489,26 @@ class ReporteDashboardResumenView(APIView):
             })
         return resultado
 
+    def _totales_efectivo_transferencia(self, ventas_qs):
+        totales = (
+            ventas_qs
+            .values('tipo_pago')
+            .annotate(monto_total=Sum('total'))
+            .filter(tipo_pago__in=[Venta.TIPO_PAGO_EFECTIVO, Venta.TIPO_PAGO_TRANSFERENCIA])
+        )
+
+        resultado = []
+        for item in totales:
+            tipo = item['tipo_pago']
+            monto = float(item['monto_total'] or 0)
+            resultado.append({
+                'metodo': tipo,
+                'label': self.TIPO_PAGO_LABELS.get(tipo, tipo.replace('_', ' ').title()),
+                'monto': round(monto, 2),
+            })
+        
+        return resultado
+
     def _top_productos(self, inicio, fin_exclusivo):
         top = (
             DetalleVenta.objects
@@ -522,6 +542,7 @@ class ReporteDashboardResumenView(APIView):
             'horas_pico': self._horas_pico(ventas_qs),
             'flujo_dia_hora': self._flujo_dia_hora(ventas_qs, incluir_finde),
             'preferencia_pago': self._preferencia_pago(ventas_qs),
+            'totales_efectivo_transferencia': self._totales_efectivo_transferencia(ventas_qs),
             'top_productos': self._top_productos(inicio, fin_exclusivo),
         }
         return Response(response)

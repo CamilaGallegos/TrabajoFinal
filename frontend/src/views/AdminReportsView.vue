@@ -2,11 +2,17 @@
 import { computed, onMounted, ref } from 'vue'
 import axios from 'axios'
 
-const cargando = ref(false)
-const error = ref('')
-const incluirFinde = ref(false)
-const semanaSeleccionada = ref('')
+const semanaMovimiento = ref('')
+const incluirFindeMovimiento = ref(false)
 const movimientoDiaSemana = ref([])
+const cargandoMovimiento = ref(false)
+const errorMovimiento = ref('')
+
+const semanaHoras = ref('')
+const incluirFindeHoras = ref(false)
+const flujoDiaHora = ref([])
+const cargandoHoras = ref(false)
+const errorHoras = ref('')
 
 const formatearFechaIso = (fecha) => {
   const year = fecha.getUTCFullYear()
@@ -30,8 +36,7 @@ const semanaActualIso = () => {
   return `${year}-W${String(week).padStart(2, '0')}`
 }
 
-const rangoSemana = computed(() => {
-  const valor = semanaSeleccionada.value
+const obtenerRangoSemana = (valor) => {
   if (!valor || !valor.includes('-W')) {
     return { desde: '', hasta: '' }
   }
@@ -60,40 +65,79 @@ const rangoSemana = computed(() => {
     desde: formatearFechaIso(inicio),
     hasta: formatearFechaIso(fin),
   }
-})
+}
 
-const rangoSemanaTexto = computed(() => {
-  if (!rangoSemana.value.desde || !rangoSemana.value.hasta) {
+const rangoMovimiento = computed(() => obtenerRangoSemana(semanaMovimiento.value))
+const rangoHoras = computed(() => obtenerRangoSemana(semanaHoras.value))
+
+const rangoTexto = (rango) => {
+  if (!rango.desde || !rango.hasta) {
     return ''
   }
-  return `${rangoSemana.value.desde} al ${rangoSemana.value.hasta}`
-})
+  return `${rango.desde} al ${rango.hasta}`
+}
+
+const rangoMovimientoTexto = computed(() => rangoTexto(rangoMovimiento.value))
+const rangoHorasTexto = computed(() => rangoTexto(rangoHoras.value))
+
+const consultarResumen = async ({ fechaDesde, fechaHasta, incluirFinde = false }) => {
+  const respuesta = await axios.get('http://localhost:8000/api/reportes/dashboard-resumen/', {
+    params: {
+      fecha_desde: fechaDesde,
+      fecha_hasta: fechaHasta,
+      incluir_finde: incluirFinde,
+      _: Date.now(),
+    },
+  })
+
+  return respuesta.data || {}
+}
 
 const cargarMovimientoSemana = async () => {
-  if (!rangoSemana.value.desde || !rangoSemana.value.hasta) {
-    error.value = 'Selecciona una semana valida'
+  if (!rangoMovimiento.value.desde || !rangoMovimiento.value.hasta) {
+    errorMovimiento.value = 'Selecciona una semana valida'
     return
   }
 
-  cargando.value = true
-  error.value = ''
+  cargandoMovimiento.value = true
+  errorMovimiento.value = ''
 
   try {
-    const respuesta = await axios.get('http://localhost:8000/api/reportes/dashboard-resumen/', {
-      params: {
-        fecha_desde: rangoSemana.value.desde,
-        fecha_hasta: rangoSemana.value.hasta,
-        incluir_finde: incluirFinde.value,
-        _: Date.now(),
-      },
+    const data = await consultarResumen({
+      fechaDesde: rangoMovimiento.value.desde,
+      fechaHasta: rangoMovimiento.value.hasta,
+      incluirFinde: incluirFindeMovimiento.value,
     })
-
-    movimientoDiaSemana.value = respuesta.data?.movimiento_dia_semana || []
+    movimientoDiaSemana.value = data.movimiento_dia_semana || []
   } catch (err) {
     movimientoDiaSemana.value = []
-    error.value = 'No se pudieron cargar los reportes'
+    errorMovimiento.value = 'No se pudo cargar el movimiento semanal'
   } finally {
-    cargando.value = false
+    cargandoMovimiento.value = false
+  }
+}
+
+const cargarHorasSemana = async () => {
+  if (!rangoHoras.value.desde || !rangoHoras.value.hasta) {
+    errorHoras.value = 'Selecciona una semana valida'
+    return
+  }
+
+  cargandoHoras.value = true
+  errorHoras.value = ''
+
+  try {
+    const data = await consultarResumen({
+      fechaDesde: rangoHoras.value.desde,
+      fechaHasta: rangoHoras.value.hasta,
+      incluirFinde: incluirFindeHoras.value,
+    })
+    flujoDiaHora.value = data.flujo_dia_hora || []
+  } catch (err) {
+    flujoDiaHora.value = []
+    errorHoras.value = 'No se pudo cargar el flujo por dia y hora'
+  } finally {
+    cargandoHoras.value = false
   }
 }
 
@@ -155,9 +199,105 @@ const movimientoOptions = computed(() => ({
   },
 }))
 
+const diasHeatmap = computed(() => (
+  incluirFindeHoras.value
+    ? ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo']
+    : ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes']
+))
+
+const horasHeatmap = computed(() => {
+  const horas = []
+  for (let hora = 9; hora <= 20; hora += 1) {
+    horas.push(`${String(hora).padStart(2, '0')}:00`)
+  }
+  return horas
+})
+
+const horasSeries = computed(() => {
+  const lookup = new Map(
+    flujoDiaHora.value.map((item) => [`${item.dia}|${item.hora}`, Number(item.ventas || 0)])
+  )
+
+  return diasHeatmap.value.map((dia) => ({
+    name: dia,
+    data: horasHeatmap.value.map((hora) => ({
+      x: hora,
+      y: lookup.get(`${dia}|${hora}`) ?? 0,
+    })),
+  }))
+})
+
+const horasOptions = computed(() => ({
+  chart: {
+    id: 'flujo-dia-hora-semana',
+    toolbar: { show: false },
+    fontFamily: 'Poppins, sans-serif',
+  },
+  plotOptions: {
+    heatmap: {
+      radius: 6,
+      shadeIntensity: 0.6,
+      colorScale: {
+        ranges: [
+          { from: 0, to: 0, color: '#e2e8f0', name: 'Sin ventas' },
+          { from: 1, to: 4, color: '#c7f9cc', name: 'Bajo' },
+          { from: 5, to: 9, color: '#80ed99', name: 'Medio' },
+          { from: 10, to: 9999, color: '#06d6a0', name: 'Alto' },
+        ],
+      },
+    },
+  },
+  dataLabels: {
+    enabled: false,
+  },
+  grid: {
+    strokeDashArray: 4,
+    borderColor: '#e2e8f0',
+  },
+  xaxis: {
+    labels: {
+      style: {
+        colors: '#334155',
+        fontSize: '12px',
+      },
+    },
+    title: {
+      text: 'Hora del dia',
+      style: {
+        color: '#475569',
+      },
+    },
+  },
+  yaxis: {
+    labels: {
+      style: {
+        colors: '#334155',
+      },
+    },
+    title: {
+      text: 'Dia de la semana',
+      style: {
+        color: '#475569',
+      },
+    },
+  },
+  tooltip: {
+    theme: 'light',
+    custom: ({ series, seriesIndex, dataPointIndex, w }) => {
+      const dia = w.config.series[seriesIndex].name
+      const hora = w.config.series[seriesIndex].data[dataPointIndex].x
+      const valor = series[seriesIndex][dataPointIndex]
+      return `<div style="padding:8px 10px;"><strong>${dia}</strong><br/>${hora}: ${valor} ventas</div>`
+    },
+  },
+}))
+
 onMounted(() => {
-  semanaSeleccionada.value = semanaActualIso()
+  const semanaActual = semanaActualIso()
+  semanaMovimiento.value = semanaActual
+  semanaHoras.value = semanaActual
   cargarMovimientoSemana()
+  cargarHorasSemana()
 })
 </script>
 
@@ -170,10 +310,7 @@ onMounted(() => {
 
     </header>
 
-    <div v-if="cargando" class="estado-msg">Cargando reportes...</div>
-    <div v-else-if="error" class="estado-msg error">{{ error }}</div>
-
-    <section v-else class="chart-grid">
+    <section class="chart-grid">
       <article class="chart-card">
         <header class="chart-title">
           <h3>Movimientos por dia por semana</h3>
@@ -182,11 +319,11 @@ onMounted(() => {
         <div class="reports-actions chart-actions">
           <label>
             Semana
-            <input v-model="semanaSeleccionada" type="week" />
+            <input v-model="semanaMovimiento" type="week" />
           </label>
 
           <label class="check-control">
-            <input v-model="incluirFinde" type="checkbox" />
+            <input v-model="incluirFindeMovimiento" type="checkbox" />
             Incluir finde
           </label>
 
@@ -194,10 +331,12 @@ onMounted(() => {
             Actualizar
           </button>
 
-          <small v-if="rangoSemanaTexto" class="week-range">Rango: {{ rangoSemanaTexto }}</small>
+          <small v-if="rangoMovimientoTexto" class="week-range">Rango: {{ rangoMovimientoTexto }}</small>
         </div>
 
-        <div v-if="movimientoDiaSemana.length === 0" class="estado-msg">
+        <div v-if="cargandoMovimiento" class="estado-msg">Cargando movimiento semanal...</div>
+        <div v-else-if="errorMovimiento" class="estado-msg error">{{ errorMovimiento }}</div>
+        <div v-else-if="movimientoDiaSemana.length === 0" class="estado-msg">
           No hay datos para la semana seleccionada.
         </div>
 
@@ -207,6 +346,44 @@ onMounted(() => {
           height="320"
           :options="movimientoOptions"
           :series="movimientoSeries"
+        />
+      </article>
+
+      <article class="chart-card">
+        <header class="chart-title">
+          <h3>Flujo por Dia y Hora</h3>
+        </header>
+
+        <div class="reports-actions chart-actions">
+          <label>
+            Semana
+            <input v-model="semanaHoras" type="week" />
+          </label>
+
+          <label class="check-control">
+            <input v-model="incluirFindeHoras" type="checkbox" />
+            Incluir finde
+          </label>
+
+          <button type="button" class="btn-refresh" @click="cargarHorasSemana">
+            Actualizar
+          </button>
+
+          <small v-if="rangoHorasTexto" class="week-range">Rango: {{ rangoHorasTexto }}</small>
+        </div>
+
+        <div v-if="cargandoHoras" class="estado-msg">Cargando horas pico...</div>
+        <div v-else-if="errorHoras" class="estado-msg error">{{ errorHoras }}</div>
+        <div v-else-if="flujoDiaHora.length === 0" class="estado-msg">
+          No hay datos de flujo para la semana seleccionada.
+        </div>
+
+        <apexchart
+          v-else
+          type="heatmap"
+          height="320"
+          :options="horasOptions"
+          :series="horasSeries"
         />
       </article>
     </section>
@@ -309,6 +486,7 @@ onMounted(() => {
 .chart-grid {
   display: grid;
   gap: 14px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .chart-card {
@@ -332,6 +510,10 @@ onMounted(() => {
 @media (max-width: 900px) {
   .reports-header {
     flex-direction: column;
+  }
+
+  .chart-grid {
+    grid-template-columns: 1fr;
   }
 }
 </style>

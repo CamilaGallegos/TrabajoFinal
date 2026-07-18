@@ -1,7 +1,8 @@
 from django.utils import timezone
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 from django.db.models import Count, Q, Sum
-from django.db.models.functions import ExtractHour, ExtractWeekDay
+from django.db.models.functions import ExtractHour, ExtractIsoWeekDay
 from rest_framework import mixins, viewsets, status
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.permissions import AllowAny
@@ -352,6 +353,7 @@ class AsistenciaResumenView(APIView):
 
 
 class ReporteDashboardResumenView(APIView):
+    REPORT_TIMEZONE = ZoneInfo('America/Argentina/Buenos_Aires')
     WEEKDAY_ORDER = [1, 2, 3, 4, 5, 6, 7]
     WEEKDAY_LABELS = {
         1: 'Lunes',
@@ -383,7 +385,7 @@ class ReporteDashboardResumenView(APIView):
             return None
 
     def _default_date_range(self):
-        now = timezone.localtime(timezone.now())
+        now = timezone.localtime(timezone.now(), self.REPORT_TIMEZONE)
         start = now.date().replace(day=1)
         return start, now.date()
 
@@ -401,15 +403,14 @@ class ReporteDashboardResumenView(APIView):
         if fecha_desde > fecha_hasta:
             fecha_desde, fecha_hasta = fecha_hasta, fecha_desde
 
-        tz = timezone.get_current_timezone()
-        inicio = timezone.make_aware(datetime.combine(fecha_desde, datetime.min.time()), tz)
-        fin_exclusivo = timezone.make_aware(datetime.combine(fecha_hasta + timedelta(days=1), datetime.min.time()), tz)
+        inicio = timezone.make_aware(datetime.combine(fecha_desde, datetime.min.time()), self.REPORT_TIMEZONE)
+        fin_exclusivo = timezone.make_aware(datetime.combine(fecha_hasta + timedelta(days=1), datetime.min.time()), self.REPORT_TIMEZONE)
         return fecha_desde, fecha_hasta, inicio, fin_exclusivo
 
     def _movimiento_por_dia(self, ventas_qs, incluir_finde):
         ventas_por_dia = {
             item['weekday']: item['ventas']
-            for item in ventas_qs.annotate(weekday=ExtractWeekDay('fecha')).values('weekday').annotate(ventas=Count('id'))
+            for item in ventas_qs.annotate(weekday=ExtractIsoWeekDay('fecha', tzinfo=self.REPORT_TIMEZONE)).values('weekday').annotate(ventas=Count('id'))
         }
 
         dias_base = [1, 2, 3, 4, 5] if not incluir_finde else self.WEEKDAY_ORDER
@@ -424,10 +425,10 @@ class ReporteDashboardResumenView(APIView):
     def _horas_pico(self, ventas_qs):
         ventas_por_hora = {
             item['hora']: item['ventas']
-            for item in ventas_qs.annotate(hora=ExtractHour('fecha')).values('hora').annotate(ventas=Count('id'))
+            for item in ventas_qs.annotate(hora=ExtractHour('fecha', tzinfo=self.REPORT_TIMEZONE)).values('hora').annotate(ventas=Count('id'))
         }
 
-        inicio_hora, fin_hora = 8, 20
+        inicio_hora, fin_hora = 9, 20
         return [
             {
                 'hora': f'{hora:02d}:00',
@@ -435,6 +436,38 @@ class ReporteDashboardResumenView(APIView):
             }
             for hora in range(inicio_hora, fin_hora + 1)
         ]
+
+    def _flujo_dia_hora(self, ventas_qs, incluir_finde):
+        agregado = (
+            ventas_qs
+            .annotate(
+                weekday=ExtractIsoWeekDay('fecha', tzinfo=self.REPORT_TIMEZONE),
+                hora=ExtractHour('fecha', tzinfo=self.REPORT_TIMEZONE),
+            )
+            .values('weekday', 'hora')
+            .annotate(ventas=Count('id'))
+            .order_by('weekday', 'hora')
+        )
+
+        dias_permitidos = set([1, 2, 3, 4, 5] if not incluir_finde else self.WEEKDAY_ORDER)
+        inicio_hora, fin_hora = 9, 20
+
+        resultado = []
+        for item in agregado:
+            dia_num = item['weekday']
+            hora_num = item['hora']
+            if dia_num not in dias_permitidos:
+                continue
+            if hora_num is None or hora_num < inicio_hora or hora_num > fin_hora:
+                continue
+
+            resultado.append({
+                'dia': self.WEEKDAY_LABELS[dia_num],
+                'hora': f'{hora_num:02d}:00',
+                'ventas': int(item['ventas']),
+            })
+
+        return resultado
 
     def _preferencia_pago(self, ventas_qs):
         totales = list(ventas_qs.values('tipo_pago').annotate(transacciones=Count('id')).order_by())
@@ -487,6 +520,7 @@ class ReporteDashboardResumenView(APIView):
             },
             'movimiento_dia_semana': self._movimiento_por_dia(ventas_qs, incluir_finde),
             'horas_pico': self._horas_pico(ventas_qs),
+            'flujo_dia_hora': self._flujo_dia_hora(ventas_qs, incluir_finde),
             'preferencia_pago': self._preferencia_pago(ventas_qs),
             'top_productos': self._top_productos(inicio, fin_exclusivo),
         }

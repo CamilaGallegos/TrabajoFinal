@@ -1,5 +1,6 @@
 import { createApp } from 'vue'
 import axios from 'axios'
+import VueApexCharts from 'vue3-apexcharts'
 import './style.css'
 import App from './App.vue'
 import router from './router'
@@ -33,4 +34,7 @@ const restaurarAuthPersistida = () => {
 
 restaurarAuthPersistida()
 
-createApp(App).use(router).mount('#app')
+const app = createApp(App)
+app.use(router)
+app.component('apexchart', VueApexCharts)
+app.mount('#app')

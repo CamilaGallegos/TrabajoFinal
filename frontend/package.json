@@ -11,9 +11,12 @@
   "dependencies": {
     "apexcharts": "^5.16.0",
     "axios": "^1.16.1",
+    "jspdf": "^4.2.1",
+    "jspdf-autotable": "^5.0.8",
     "vue": "^3.3.8",
     "vue-router": "^4.6.4",
-    "vue3-apexcharts": "^1.11.1"
+    "vue3-apexcharts": "^1.11.1",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^4.5.0",

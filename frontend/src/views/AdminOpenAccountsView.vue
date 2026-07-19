@@ -1,6 +1,9 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import axios from 'axios'
+import * as XLSX from 'xlsx'
+import jsPDF from 'jspdf'
+import autoTable from 'jspdf-autotable'
 
 const fechaDesde = ref('')
 const fechaHasta = ref('')
@@ -8,6 +11,7 @@ const cargando = ref(false)
 const error = ref('')
 const cuentas = ref([])
 const cuentasExpandida = ref({})
+const exportando = ref({})
 
 const formatMoney = (value) => {
   const number = Number(value || 0)
@@ -32,6 +36,140 @@ const formatDateTime = (isoDate) => {
   })
 }
 
+const formatTipoPago = (value) => {
+  if (!value) {
+    return '-'
+  }
+  return String(value)
+    .replaceAll('_', ' ')
+    .replace(/\b\w/g, (char) => char.toUpperCase())
+}
+
+// Limpia texto para usarlo como nombre de archivo
+const sanitizeFileName = (value) => {
+  return String(value || 'cuenta')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-zA-Z0-9-_]/g, '_')
+}
+
+const rangoTextoExport = computed(() => {
+  const desde = fechaDesde.value || 'Sin fecha desde'
+  const hasta = fechaHasta.value || 'Sin fecha hasta'
+  if (!fechaDesde.value && !fechaHasta.value) {
+    return 'Sin filtro de fechas'
+  }
+  return `${desde} al ${hasta}`
+})
+
+const exportingKey = (cuentaId, tipo) => `cuenta-${cuentaId}-${tipo}`
+
+const estaExportando = (cuentaId, tipo) => Boolean(exportando.value[exportingKey(cuentaId, tipo)])
+
+// Actualiza el estado de exportacion para habilitar/deshabilitar botones
+const setExportando = (cuentaId, tipo, value) => {
+  exportando.value[exportingKey(cuentaId, tipo)] = value
+}
+
+const ventaDetallesTexto = (venta) => {
+  const detalles = Array.isArray(venta.detalles) ? venta.detalles : []
+  if (detalles.length === 0) {
+    return '-'
+  }
+
+  return detalles
+    .map((detalle) => `${detalle.cantidad} x ${detalle.producto_nombre}`)
+    .join(' | ')
+}
+
+const exportarExcelCuenta = (cuenta) => {
+  setExportando(cuenta.cuenta_id, 'excel', true)
+  try {
+    const wsData = [
+      ['Cuenta abierta', cuenta.nombre_departamento],
+      ['Responsable', cuenta.responsable || '-'],
+      ['Rango aplicado', rangoTextoExport.value],
+      ['Total cuenta', Number(cuenta.total_ventas || 0)],
+      ['Cantidad de ventas', cuenta.cantidad_ventas || 0],
+      [],
+      ['Venta ID', 'Fecha', 'Becado', 'Tipo pago', 'Total', 'Detalle'],
+    ]
+
+    for (const venta of cuenta.ventas || []) {
+      wsData.push([
+        venta.id,
+        formatDateTime(venta.fecha),
+        venta.becado_nombre,
+        formatTipoPago(venta.tipo_pago),
+        Number(venta.total || 0),
+        ventaDetallesTexto(venta),
+      ])
+    }
+
+    const workbook = XLSX.utils.book_new()
+    const worksheet = XLSX.utils.aoa_to_sheet(wsData)
+    worksheet['!cols'] = [
+      { wch: 10 },
+      { wch: 20 },
+      { wch: 22 },
+      { wch: 18 },
+      { wch: 14 },
+      { wch: 60 },
+    ]
+
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Cuenta abierta')
+    const fileName = `cuenta_abierta_${sanitizeFileName(cuenta.nombre_departamento)}.xlsx`
+    XLSX.writeFile(workbook, fileName)
+  } finally {
+    setExportando(cuenta.cuenta_id, 'excel', false)
+  }
+}
+
+const exportarPdfCuenta = (cuenta) => {
+  setExportando(cuenta.cuenta_id, 'pdf', true)
+  try {
+    const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' })
+    doc.setFontSize(14)
+    doc.text(`Cuenta abierta: ${cuenta.nombre_departamento}`, 14, 14)
+
+    doc.setFontSize(10)
+    doc.text(`Responsable: ${cuenta.responsable || '-'}`, 14, 21)
+    doc.text(`Rango: ${rangoTextoExport.value}`, 14, 27)
+    doc.text(`Total cuenta: ${formatMoney(cuenta.total_ventas)}`, 14, 33)
+
+    const body = (cuenta.ventas || []).map((venta) => ([
+      venta.id,
+      formatDateTime(venta.fecha),
+      venta.becado_nombre,
+      formatTipoPago(venta.tipo_pago),
+      formatMoney(venta.total),
+      ventaDetallesTexto(venta),
+    ]))
+
+    autoTable(doc, {
+      startY: 38,
+      head: [['Venta ID', 'Fecha', 'Becado', 'Tipo pago', 'Total', 'Detalle']],
+      body,
+      styles: { fontSize: 8, cellPadding: 2 },
+      headStyles: { fillColor: [5, 120, 175] },
+      columnStyles: {
+        0: { cellWidth: 16 },
+        1: { cellWidth: 30 },
+        2: { cellWidth: 38 },
+        3: { cellWidth: 28 },
+        4: { cellWidth: 22 },
+        5: { cellWidth: 'auto' },
+      },
+    })
+
+    const fileName = `cuenta_abierta_${sanitizeFileName(cuenta.nombre_departamento)}.pdf`
+    doc.save(fileName)
+  } finally {
+    setExportando(cuenta.cuenta_id, 'pdf', false)
+  }
+}
+
+// controla el "ver más" por cuenta
 const cuentaKey = (cuentaId) => `cuenta-${cuentaId}`
 
 const cuentaExpandida = (cuentaId) => Boolean(cuentasExpandida.value[cuentaKey(cuentaId)])
@@ -127,9 +265,30 @@ onMounted(() => {
             <p v-if="cuenta.responsable">Responsable: {{ cuenta.responsable }}</p>
           </div>
 
-          <div class="cuenta-metricas">
-            <strong>{{ formatMoney(cuenta.total_ventas) }}</strong>
-            <small>{{ cuenta.cantidad_ventas }} ventas</small>
+          <div class="cuenta-resumen">
+            <div class="cuenta-metricas">
+              <strong>{{ formatMoney(cuenta.total_ventas) }}</strong>
+              <small>{{ cuenta.cantidad_ventas }} ventas</small>
+            </div>
+
+            <div class="cuenta-actions">
+              <button
+                type="button"
+                class="btn-export"
+                :disabled="estaExportando(cuenta.cuenta_id, 'excel')"
+                @click="exportarExcelCuenta(cuenta)"
+              >
+                {{ estaExportando(cuenta.cuenta_id, 'excel') ? 'Generando...' : 'Exportar Excel' }}
+              </button>
+              <button
+                type="button"
+                class="btn-export"
+                :disabled="estaExportando(cuenta.cuenta_id, 'pdf')"
+                @click="exportarPdfCuenta(cuenta)"
+              >
+                {{ estaExportando(cuenta.cuenta_id, 'pdf') ? 'Generando...' : 'Exportar PDF' }}
+              </button>
+            </div>
           </div>
         </header>
 
@@ -288,6 +447,12 @@ onMounted(() => {
   gap: 4px;
 }
 
+.cuenta-resumen {
+  display: grid;
+  gap: 8px;
+  justify-items: end;
+}
+
 .cuenta-metricas strong {
   color: #0578af;
   font-size: 18px;
@@ -295,6 +460,32 @@ onMounted(() => {
 
 .cuenta-metricas small {
   color: #64748b;
+}
+
+.cuenta-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.btn-export {
+  border: 1px solid #d8dde6;
+  border-radius: 10px;
+  padding: 8px 10px;
+  background: #ffffff;
+  color: #0f172a;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.btn-export:hover {
+  background: #f8fafc;
+}
+
+.btn-export:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .ventas-table {
@@ -358,6 +549,10 @@ onMounted(() => {
 
   .cuenta-metricas {
     text-align: left;
+  }
+
+  .cuenta-resumen {
+    justify-items: start;
   }
 
   .ventas-table {

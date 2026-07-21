@@ -100,21 +100,26 @@ class VentaCreateSerializer(serializers.Serializer):
 
         total = Decimal('0')
         detalles = []
+        cantidades_por_producto = {}
 
         for item_data in items_data:
             producto = productos[item_data['producto_id']]
             cantidad = item_data['cantidad']
 
             if not producto.es_servicio:
-                stock_actual = producto.stock or 0
-                if stock_actual < cantidad:
-                    raise serializers.ValidationError(
-                        {'items': f'Stock insuficiente para {producto.nombre}. Disponible: {stock_actual}.'}
-                    )
+                cantidades_por_producto[producto.id] = cantidades_por_producto.get(producto.id, 0) + cantidad
 
             subtotal = producto.precio * cantidad
             total += subtotal
             detalles.append((producto, cantidad, producto.precio))
+
+        for producto_id, cantidad_solicitada in cantidades_por_producto.items():
+            producto = productos[producto_id]
+            stock_actual = producto.stock or 0
+            if stock_actual < cantidad_solicitada:
+                raise serializers.ValidationError(
+                    {'items': f'Stock insuficiente para {producto.nombre}. Disponible: {stock_actual}.'}
+                )
 
         monto_efectivo = validated_data['monto_efectivo']
         monto_transferencia = validated_data['monto_transferencia']
@@ -225,41 +230,60 @@ class VentaUpdateSerializer(serializers.Serializer):
         motivo = validated_data.pop('motivo_auditoria', '')
         items_data = validated_data.pop('items')
 
+        # Bloqueo de detalles anteriores y productos para evitar inconsistencias de stock
+        detalles_anteriores = list(
+            DetalleVenta.objects
+            .select_related('producto')
+            .select_for_update()
+            .filter(venta=instance)
+        )
+
         productos_ids = [item['producto_id'] for item in items_data]
 
         productos_a_actualizar = Producto.objects.select_for_update().filter(
-            id__in=list(set(productos_ids + [d.producto_id for d in instance.detalles.all()]))
+            id__in=list(set(productos_ids + [d.producto_id for d in detalles_anteriores]))
         )
         productos_map = {producto.id: producto for producto in productos_a_actualizar}
 
         if len(set(productos_ids)) != len([pid for pid in set(productos_ids) if pid in productos_map]):
             raise serializers.ValidationError('Uno o más productos seleccionados no existen')
 
-        # revertir cambios de stock de los detalles anteriores
-        detalles_anteriores = list(instance.detalles.select_related('producto').all())
+        cantidades_anteriores = {}
         for detalle in detalles_anteriores:
             producto = productos_map.get(detalle.producto_id)
             if producto and not producto.es_servicio:
-                producto.stock = (producto.stock or 0) + detalle.cantidad
-                producto.save(update_fields=['stock'])
+                cantidades_anteriores[detalle.producto_id] = cantidades_anteriores.get(detalle.producto_id, 0) + detalle.cantidad
 
         total_nuevo = Decimal('0')
         detalles_nuevos = []
+        cantidades_nuevas = {}
 
         for item_data in items_data:
             producto = productos_map[item_data['producto_id']]
             cantidad = item_data['cantidad']
 
-            if not producto.es_servicio:
-                stock_actual = producto.stock or 0
-                if stock_actual < cantidad:
-                    raise serializers.ValidationError(
-                        {'items': f'Stock insuficiente para {producto.nombre}. Disponible: {stock_actual}.'}
-                    )
-
             subtotal = producto.precio * cantidad
             total_nuevo += subtotal
             detalles_nuevos.append((producto, cantidad, producto.precio))
+
+            if not producto.es_servicio:
+                cantidades_nuevas[producto.id] = cantidades_nuevas.get(producto.id, 0) + cantidad
+
+        # disponible_para_editar = stock_actual + cantidad_que_ya_tenia_esta_venta
+        for producto_id in set(cantidades_anteriores.keys()) | set(cantidades_nuevas.keys()):
+            producto = productos_map[producto_id]
+            if producto.es_servicio:
+                continue
+
+            stock_actual = producto.stock or 0
+            cantidad_anterior = cantidades_anteriores.get(producto_id, 0)
+            cantidad_nueva = cantidades_nuevas.get(producto_id, 0)
+            disponible_para_editar = stock_actual + cantidad_anterior
+
+            if cantidad_nueva > disponible_para_editar:
+                raise serializers.ValidationError(
+                    {'items': f'Stock insuficiente para {producto.nombre} al editar. Disponible: {disponible_para_editar}.'}
+                )
 
         tipo_pago = validated_data['tipo_pago']
         monto_efectivo = validated_data['monto_efectivo']
@@ -306,9 +330,18 @@ class VentaUpdateSerializer(serializers.Serializer):
                 cantidad=cantidad,
                 precio_unitario=precio_unitario,
             )
-            if not producto.es_servicio:
-                producto.stock = (producto.stock or 0) - cantidad
-                producto.save(update_fields=['stock'])
+
+        # Aplicar ajuste de stock final por producto (sin estados intermedios inconsistentes).
+        for producto_id in set(cantidades_anteriores.keys()) | set(cantidades_nuevas.keys()):
+            producto = productos_map[producto_id]
+            if producto.es_servicio:
+                continue
+
+            stock_actual = producto.stock or 0
+            cantidad_anterior = cantidades_anteriores.get(producto_id, 0)
+            cantidad_nueva = cantidades_nuevas.get(producto_id, 0)
+            producto.stock = stock_actual + cantidad_anterior - cantidad_nueva
+            producto.save(update_fields=['stock'])
 
         snapshot_nuevo = {
             'tipo_pago': instance.tipo_pago,

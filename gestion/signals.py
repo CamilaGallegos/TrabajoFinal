@@ -26,29 +26,11 @@ def actualizar_total_venta(sender, instance, **kwargs):
 # manejo de stock
 @receiver(post_save, sender=DetalleVenta)
 def ajustar_stock_dinamico(sender, instance, created, **kwargs):
-    producto = instance.producto
-    
-    if producto.es_servicio or producto.stock is None:
-        return
-
-    if created:
-        diferencia = instance.cantidad
-    else:
-        cantidad_anterior = getattr(instance, '_cantidad_anterior', 0)
-        diferencia = instance.cantidad - cantidad_anterior
-
-    producto.stock -= diferencia
-    producto.save(update_fields=['stock'])
+    return
 
 @receiver(post_delete, sender=DetalleVenta)
 def devolver_stock(sender, instance, **kwargs):
-    producto = instance.producto
-
-    if producto.es_servicio or producto.stock is None:
-        return
-
-    producto.stock += instance.cantidad
-    producto.save(update_fields=['stock'])
+    return
 # precio automaticado (toma del producto)
 @receiver(pre_save, sender=DetalleVenta)
 def asignar_precio_unitario(sender, instance, **kwargs):

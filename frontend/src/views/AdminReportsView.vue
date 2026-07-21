@@ -630,6 +630,7 @@ onMounted(() => {
     <header class="reports-header">
       <div>
         <h2>Reportes</h2>
+        <p>Acá podes ver diferentes reportes y estadísticas</p>
       </div>
 
     </header>

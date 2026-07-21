@@ -232,6 +232,7 @@ onMounted(() => {
     <header class="open-accounts-header">
       <div>
         <h2>Cuentas abiertas</h2>
+        <p>Acá podes ver y exportar todas las ventas de las cuentas abiertas</p>
       </div>
 
       <div class="filters-actions">

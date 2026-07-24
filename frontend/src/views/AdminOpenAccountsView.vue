@@ -10,6 +10,7 @@ const fechaHasta = ref('')
 const cargando = ref(false)
 const error = ref('')
 const cuentas = ref([])
+const cuentaSeleccionadaId = ref('')
 const cuentasExpandida = ref({})
 const exportando = ref({})
 
@@ -180,15 +181,44 @@ const toggleCuentaExpandida = (cuentaId) => {
 }
 
 const ventasVisibles = (cuenta) => {
+  const ventas = cuenta?.ventas || []
+
   if (cuentaExpandida(cuenta.cuenta_id)) {
-    return cuenta.ventas
+    return ventas
   }
-  return cuenta.ventas.slice(0, 5)
+
+  return ventas.slice(0, 5)
 }
 
 const puedeExpandir = (cuenta) => (cuenta.ventas?.length || 0) > 5
 
 const hayFiltroActivo = computed(() => Boolean(fechaDesde.value || fechaHasta.value))
+
+const cuentaSeleccionada = computed(() => {
+  return cuentas.value.find((cuenta) => String(cuenta.cuenta_id) === String(cuentaSeleccionadaId.value)) || null
+})
+
+const opcionesCuentas = computed(() => {
+  return cuentas.value.map((cuenta) => ({
+    value: String(cuenta.cuenta_id),
+    label: `${cuenta.nombre_departamento}`,
+  }))
+})
+
+const sincronizarCuentaSeleccionada = () => {
+  if (cuentas.value.length === 0) {
+    cuentaSeleccionadaId.value = ''
+    return
+  }
+
+  const existeSeleccion = cuentas.value.some(
+    (cuenta) => String(cuenta.cuenta_id) === String(cuentaSeleccionadaId.value),
+  )
+
+  if (!existeSeleccion) {
+    cuentaSeleccionadaId.value = String(cuentas.value[0].cuenta_id)
+  }
+}
 
 const cargarResumen = async () => {
   cargando.value = true
@@ -208,12 +238,18 @@ const cargarResumen = async () => {
     const response = await axios.get('http://localhost:8000/api/cuentas-abiertas-resumen/', { params })
     cuentas.value = response.data?.cuentas || []
     cuentasExpandida.value = {}
+    sincronizarCuentaSeleccionada()
   } catch (err) {
     cuentas.value = []
+    cuentaSeleccionadaId.value = ''
     error.value = 'No se pudo cargar el resumen de cuentas abiertas'
   } finally {
     cargando.value = false
   }
+}
+
+const cambiarCuentaSeleccionada = (event) => {
+  cuentaSeleccionadaId.value = event.target.value
 }
 
 const limpiarFiltros = () => {
@@ -232,10 +268,19 @@ onMounted(() => {
     <header class="open-accounts-header">
       <div>
         <h2>Cuentas abiertas</h2>
-        <p>Acá podes ver y exportar todas las ventas de las cuentas abiertas</p>
       </div>
 
       <div class="filters-actions">
+        <label class="cuenta-selector">
+          Cuenta
+          <select :value="cuentaSeleccionadaId" @change="cambiarCuentaSeleccionada">
+            <option value="" disabled>Seleccioná una cuenta</option>
+            <option v-for="opcion in opcionesCuentas" :key="opcion.value" :value="opcion.value">
+              {{ opcion.label }}
+            </option>
+          </select>
+        </label>
+
         <label>
           Desde
           <input v-model="fechaDesde" type="date" />
@@ -256,44 +301,46 @@ onMounted(() => {
     <div v-if="cargando" class="estado-msg">Cargando cuentas abiertas...</div>
     <div v-else-if="error" class="estado-msg error">{{ error }}</div>
 
-    <section v-else class="cuentas-grid">
+    <section v-else class="cuenta-display">
       <div v-if="cuentas.length === 0" class="estado-msg">No hay cuentas abiertas para mostrar.</div>
 
-      <article v-for="cuenta in cuentas" :key="cuenta.cuenta_id" class="cuenta-card">
+      <div v-else-if="!cuentaSeleccionada" class="estado-msg">Seleccioná una cuenta para ver su detalle.</div>
+
+      <article v-else :key="cuentaSeleccionada.cuenta_id" class="cuenta-card">
         <header class="cuenta-header">
           <div>
-            <h3>{{ cuenta.nombre_departamento }}</h3>
-            <p v-if="cuenta.responsable">Responsable: {{ cuenta.responsable }}</p>
+            <h3>{{ cuentaSeleccionada.nombre_departamento }}</h3>
+            <p v-if="cuentaSeleccionada.responsable">Responsable: {{ cuentaSeleccionada.responsable }}</p>
           </div>
 
           <div class="cuenta-resumen">
             <div class="cuenta-metricas">
-              <strong>{{ formatMoney(cuenta.total_ventas) }}</strong>
-              <small>{{ cuenta.cantidad_ventas }} ventas</small>
+              <strong>{{ formatMoney(cuentaSeleccionada.total_ventas) }}</strong>
+              <small>{{ cuentaSeleccionada.cantidad_ventas }} ventas</small>
             </div>
 
             <div class="cuenta-actions">
               <button
                 type="button"
                 class="btn-export"
-                :disabled="estaExportando(cuenta.cuenta_id, 'excel')"
-                @click="exportarExcelCuenta(cuenta)"
+                :disabled="estaExportando(cuentaSeleccionada.cuenta_id, 'excel')"
+                @click="exportarExcelCuenta(cuentaSeleccionada)"
               >
-                {{ estaExportando(cuenta.cuenta_id, 'excel') ? 'Generando...' : 'Exportar Excel' }}
+                {{ estaExportando(cuentaSeleccionada.cuenta_id, 'excel') ? 'Generando...' : 'Exportar Excel' }}
               </button>
               <button
                 type="button"
                 class="btn-export"
-                :disabled="estaExportando(cuenta.cuenta_id, 'pdf')"
-                @click="exportarPdfCuenta(cuenta)"
+                :disabled="estaExportando(cuentaSeleccionada.cuenta_id, 'pdf')"
+                @click="exportarPdfCuenta(cuentaSeleccionada)"
               >
-                {{ estaExportando(cuenta.cuenta_id, 'pdf') ? 'Generando...' : 'Exportar PDF' }}
+                {{ estaExportando(cuentaSeleccionada.cuenta_id, 'pdf') ? 'Generando...' : 'Exportar PDF' }}
               </button>
             </div>
           </div>
         </header>
 
-        <div v-if="cuenta.ventas.length === 0" class="estado-msg">
+        <div v-if="(cuentaSeleccionada.ventas || []).length === 0" class="estado-msg">
           No hay ventas para esta cuenta en el rango seleccionado.
         </div>
 
@@ -307,7 +354,7 @@ onMounted(() => {
             </tr>
           </thead>
           <tbody>
-            <tr v-for="venta in ventasVisibles(cuenta)" :key="venta.id">
+            <tr v-for="venta in ventasVisibles(cuentaSeleccionada)" :key="venta.id">
               <td>{{ formatDateTime(venta.fecha) }}</td>
               <td>{{ venta.becado_nombre }}</td>
               <td>{{ venta.tipo_pago }}</td>
@@ -316,9 +363,9 @@ onMounted(() => {
           </tbody>
         </table>
 
-        <div v-if="puedeExpandir(cuenta)" class="cuenta-footer">
-          <button type="button" class="btn-link" @click="toggleCuentaExpandida(cuenta.cuenta_id)">
-            {{ cuentaExpandida(cuenta.cuenta_id) ? 'Ver menos' : 'Ver mas' }}
+        <div v-if="puedeExpandir(cuentaSeleccionada)" class="cuenta-footer">
+          <button type="button" class="btn-link" @click="toggleCuentaExpandida(cuentaSeleccionada.cuenta_id)">
+            {{ cuentaExpandida(cuentaSeleccionada.cuenta_id) ? 'Ver menos' : 'Ver mas' }}
           </button>
         </div>
       </article>
@@ -361,6 +408,10 @@ onMounted(() => {
   flex-wrap: wrap;
 }
 
+.cuenta-selector {
+  min-width: 260px;
+}
+
 .filters-actions label {
   display: grid;
   gap: 4px;
@@ -370,6 +421,11 @@ onMounted(() => {
 }
 
 .filters-actions input {
+  width: 100%;
+}
+
+.filters-actions input,
+.filters-actions select {
   border: 1px solid #cbd5e1;
   border-radius: 10px;
   padding: 8px 10px;
@@ -412,7 +468,7 @@ onMounted(() => {
   color: #b91c1c;
 }
 
-.cuentas-grid {
+.cuenta-display {
   display: grid;
   gap: 14px;
 }

@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from django.db import OperationalError, ProgrammingError
 from django.db.models import Count, Q, Sum
-from django.db.models.functions import ExtractHour, ExtractIsoWeekDay
+from django.db.models.functions import ExtractHour, ExtractIsoWeekDay, TruncMonth
 from rest_framework import mixins, viewsets, status
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.permissions import AllowAny
@@ -587,6 +587,114 @@ class ReporteDashboardResumenView(APIView):
             'top_productos': self._top_productos(inicio, fin_exclusivo),
         }
         return Response(response)
+
+
+class CuentaAbiertaEvolucionMensualView(APIView):
+    REPORT_TIMEZONE = ZoneInfo('America/Argentina/Buenos_Aires')
+
+    def _parse_date(self, value):
+        if not value:
+            return None
+        try:
+            return datetime.strptime(value, '%Y-%m-%d').date()
+        except ValueError:
+            return None
+
+    def _default_date_range(self):
+        now = timezone.localtime(timezone.now(), self.REPORT_TIMEZONE).date()
+        end = now
+        start = (now.replace(day=1) - timedelta(days=1)).replace(day=1)
+        for _ in range(4):
+            start = (start.replace(day=1) - timedelta(days=1)).replace(day=1)
+        return start, end
+
+    def _month_sequence(self, start_date, end_date):
+        months = []
+        cursor = start_date.replace(day=1)
+        limit = end_date.replace(day=1)
+
+        while cursor <= limit:
+            months.append(cursor)
+            if cursor.month == 12:
+                cursor = cursor.replace(year=cursor.year + 1, month=1, day=1)
+            else:
+                cursor = cursor.replace(month=cursor.month + 1, day=1)
+
+        return months
+
+    def get(self, request):
+        fecha_desde = self._parse_date(request.query_params.get('fecha_desde'))
+        fecha_hasta = self._parse_date(request.query_params.get('fecha_hasta'))
+
+        if not fecha_desde and not fecha_hasta:
+            fecha_desde, fecha_hasta = self._default_date_range()
+        elif fecha_desde and not fecha_hasta:
+            fecha_hasta = fecha_desde
+        elif fecha_hasta and not fecha_desde:
+            fecha_desde = fecha_hasta
+
+        if fecha_desde > fecha_hasta:
+            fecha_desde, fecha_hasta = fecha_hasta, fecha_desde
+
+        inicio = timezone.make_aware(datetime.combine(fecha_desde, datetime.min.time()), self.REPORT_TIMEZONE)
+        fin_exclusivo = timezone.make_aware(
+            datetime.combine(fecha_hasta + timedelta(days=1), datetime.min.time()),
+            self.REPORT_TIMEZONE,
+        )
+
+        deuda_por_mes_qs = (
+            Venta.objects
+            .filter(
+                tipo_pago=Venta.TIPO_PAGO_CUENTA_ABIERTA,
+                fecha__gte=inicio,
+                fecha__lt=fin_exclusivo,
+            )
+            .annotate(mes=TruncMonth('fecha', tzinfo=self.REPORT_TIMEZONE))
+            .values('mes')
+            .annotate(total=Sum('total'))
+            .order_by('mes')
+        )
+
+        pagos_por_mes_qs = (
+            PagoCuentaAbierta.objects
+            .filter(fecha_pago__gte=inicio, fecha_pago__lt=fin_exclusivo)
+            .annotate(mes=TruncMonth('fecha_pago', tzinfo=self.REPORT_TIMEZONE))
+            .values('mes')
+            .annotate(total=Sum('monto'))
+            .order_by('mes')
+        )
+
+        deuda_por_mes = {
+            item['mes'].date().isoformat(): round(float(item['total'] or 0), 2)
+            for item in deuda_por_mes_qs
+            if item['mes']
+        }
+        pagos_por_mes = {
+            item['mes'].date().isoformat(): round(float(item['total'] or 0), 2)
+            for item in pagos_por_mes_qs
+            if item['mes']
+        }
+
+        meses = self._month_sequence(fecha_desde, fecha_hasta)
+        evolucion = []
+        for mes in meses:
+            key = mes.replace(day=1).isoformat()
+            deuda = deuda_por_mes.get(key, 0)
+            pagos = pagos_por_mes.get(key, 0)
+            evolucion.append({
+                'periodo': mes.strftime('%Y-%m'),
+                'deuda_generada': deuda,
+                'pagos_cobrados': pagos,
+                'variacion_neta': round(deuda - pagos, 2),
+            })
+
+        return Response({
+            'filtros': {
+                'fecha_desde': fecha_desde.isoformat(),
+                'fecha_hasta': fecha_hasta.isoformat(),
+            },
+            'evolucion': evolucion,
+        })
 
 
 class CuentaAbiertaResumenView(APIView):

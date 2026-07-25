@@ -1,6 +1,7 @@
 from django.utils import timezone
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
+from django.db import OperationalError, ProgrammingError
 from django.db.models import Count, Q, Sum
 from django.db.models.functions import ExtractHour, ExtractIsoWeekDay
 from rest_framework import mixins, viewsets, status
@@ -10,7 +11,16 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import AccessToken
 
-from .models import Producto, PerfilBecado, Asistencia, CuentaAbierta, Venta, DetalleVenta, AuditoriaVenta
+from .models import (
+    Producto,
+    PerfilBecado,
+    Asistencia,
+    CuentaAbierta,
+    Venta,
+    DetalleVenta,
+    AuditoriaVenta,
+    PagoCuentaAbierta,
+)
 from .serializers import (
     ProductoSerializer,
     CuentaAbiertaSerializer,
@@ -18,6 +28,8 @@ from .serializers import (
     VentaUpdateSerializer,
     VentaSerializer,
     AuditoriaVentaSerializer,
+    PagoCuentaAbiertaSerializer,
+    PagoCuentaAbiertaCreateSerializer,
 )
 
 class ProductoViewSet(viewsets.ModelViewSet):
@@ -40,6 +52,35 @@ class ProductoViewSet(viewsets.ModelViewSet):
 class CuentaAbiertaViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = CuentaAbierta.objects.all().order_by('nombre_departamento')
     serializer_class = CuentaAbiertaSerializer
+
+
+class PagoCuentaAbiertaViewSet(mixins.ListModelMixin, mixins.CreateModelMixin, viewsets.GenericViewSet):
+    queryset = (
+        PagoCuentaAbierta.objects
+        .select_related('cuenta_abierta', 'usuario_registro')
+        .prefetch_related('imputaciones__venta')
+        .all()
+        .order_by('-fecha_pago', '-id')
+    )
+
+    def get_serializer_class(self):
+        if self.action == 'create':
+            return PagoCuentaAbiertaCreateSerializer
+        return PagoCuentaAbiertaSerializer
+
+    def get_queryset(self):
+        queryset = self.queryset
+        cuenta_abierta_id = self.request.query_params.get('cuenta_abierta_id')
+        if cuenta_abierta_id:
+            queryset = queryset.filter(cuenta_abierta_id=cuenta_abierta_id)
+        return queryset
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data, context={'request': request})
+        serializer.is_valid(raise_exception=True)
+        pago = serializer.save()
+        response_serializer = PagoCuentaAbiertaSerializer(pago)
+        return Response(response_serializer.data, status=status.HTTP_201_CREATED)
 
 # recibe la venta y la guarda, tambien lista el historial
 class VentaViewSet(mixins.ListModelMixin, mixins.CreateModelMixin, mixins.UpdateModelMixin, viewsets.GenericViewSet):
@@ -579,9 +620,17 @@ class CuentaAbiertaResumenView(APIView):
             .order_by('cuenta_abierta_id', '-fecha')
         )
 
+        pagos_qs = (
+            PagoCuentaAbierta.objects
+            .select_related('cuenta_abierta', 'usuario_registro')
+            .prefetch_related('imputaciones__venta')
+            .order_by('-fecha_pago', '-id')
+        )
+
         if fecha_desde:
             inicio = timezone.make_aware(datetime.combine(fecha_desde, datetime.min.time()), self.REPORT_TIMEZONE)
             ventas_qs = ventas_qs.filter(fecha__gte=inicio)
+            pagos_qs = pagos_qs.filter(fecha_pago__gte=inicio)
 
         if fecha_hasta:
             fin_exclusivo = timezone.make_aware(
@@ -589,40 +638,117 @@ class CuentaAbiertaResumenView(APIView):
                 self.REPORT_TIMEZONE,
             )
             ventas_qs = ventas_qs.filter(fecha__lt=fin_exclusivo)
+            pagos_qs = pagos_qs.filter(fecha_pago__lt=fin_exclusivo)
 
         cuentas = list(CuentaAbierta.objects.all().order_by('nombre_departamento'))
         ventas_por_cuenta = {cuenta.id: [] for cuenta in cuentas}
+        pagos_por_cuenta = {cuenta.id: [] for cuenta in cuentas}
+        modo_compatibilidad = False
 
-        for venta in ventas_qs:
-            becado_user = venta.becado.user
-            becado_nombre = (f'{becado_user.first_name} {becado_user.last_name}'.strip() or becado_user.username)
-            ventas_por_cuenta.setdefault(venta.cuenta_abierta_id, []).append({
-                'id': venta.id,
-                'fecha': timezone.localtime(venta.fecha, self.REPORT_TIMEZONE).isoformat(),
-                'total': self._format_money(venta.total),
-                'tipo_pago': venta.tipo_pago,
-                'becado_nombre': becado_nombre,
-                'detalles': [
-                    {
-                        'producto_nombre': detalle.producto.nombre,
-                        'cantidad': detalle.cantidad,
-                        'precio_unitario': self._format_money(detalle.precio_unitario),
-                    }
-                    for detalle in venta.detalles.all()
-                ],
-            })
+        try:
+            ventas = list(ventas_qs)
+            pagos = list(pagos_qs)
+
+            for venta in ventas:
+                becado_user = venta.becado.user
+                becado_nombre = (f'{becado_user.first_name} {becado_user.last_name}'.strip() or becado_user.username)
+                ventas_por_cuenta.setdefault(venta.cuenta_abierta_id, []).append({
+                    'id': venta.id,
+                    'fecha': timezone.localtime(venta.fecha, self.REPORT_TIMEZONE).isoformat(),
+                    'total': self._format_money(venta.total),
+                    'saldo': self._format_money(venta.saldo),
+                    'tipo_pago': venta.tipo_pago,
+                    'becado_nombre': becado_nombre,
+                    'detalles': [
+                        {
+                            'producto_nombre': detalle.producto.nombre,
+                            'cantidad': detalle.cantidad,
+                            'precio_unitario': self._format_money(detalle.precio_unitario),
+                        }
+                        for detalle in venta.detalles.all()
+                    ],
+                })
+
+            for pago in pagos:
+                pagos_por_cuenta.setdefault(pago.cuenta_abierta_id, []).append({
+                    'id': pago.id,
+                    'fecha_pago': timezone.localtime(pago.fecha_pago, self.REPORT_TIMEZONE).isoformat(),
+                    'monto': self._format_money(pago.monto),
+                    'metodo_pago': pago.metodo_pago,
+                    'referencia': pago.referencia,
+                    'observaciones': pago.observaciones,
+                    'usuario_registro': pago.usuario_registro.get_full_name() or pago.usuario_registro.username,
+                    'imputaciones': [
+                        {
+                            'venta_id': imputacion.venta_id,
+                            'monto_aplicado': self._format_money(imputacion.monto_aplicado),
+                            'saldo_anterior': self._format_money(imputacion.saldo_anterior),
+                            'saldo_posterior': self._format_money(imputacion.saldo_posterior),
+                        }
+                        for imputacion in pago.imputaciones.all()
+                    ],
+                })
+        except (ProgrammingError, OperationalError):
+            # Compatibilidad temporal para entornos con migraciones pendientes.
+            modo_compatibilidad = True
+            ventas_legacy_qs = (
+                Venta.objects
+                .select_related('becado__user', 'cuenta_abierta')
+                .prefetch_related('detalles__producto')
+                .only('id', 'fecha', 'total', 'tipo_pago', 'becado_id', 'cuenta_abierta_id')
+                .filter(cuenta_abierta__isnull=False)
+                .order_by('cuenta_abierta_id', '-fecha')
+            )
+
+            if fecha_desde:
+                inicio = timezone.make_aware(datetime.combine(fecha_desde, datetime.min.time()), self.REPORT_TIMEZONE)
+                ventas_legacy_qs = ventas_legacy_qs.filter(fecha__gte=inicio)
+
+            if fecha_hasta:
+                fin_exclusivo = timezone.make_aware(
+                    datetime.combine(fecha_hasta + timedelta(days=1), datetime.min.time()),
+                    self.REPORT_TIMEZONE,
+                )
+                ventas_legacy_qs = ventas_legacy_qs.filter(fecha__lt=fin_exclusivo)
+
+            for venta in ventas_legacy_qs:
+                becado_user = venta.becado.user
+                becado_nombre = (f'{becado_user.first_name} {becado_user.last_name}'.strip() or becado_user.username)
+                total = self._format_money(venta.total)
+                ventas_por_cuenta.setdefault(venta.cuenta_abierta_id, []).append({
+                    'id': venta.id,
+                    'fecha': timezone.localtime(venta.fecha, self.REPORT_TIMEZONE).isoformat(),
+                    'total': total,
+                    'saldo': total,
+                    'tipo_pago': venta.tipo_pago,
+                    'becado_nombre': becado_nombre,
+                    'detalles': [
+                        {
+                            'producto_nombre': detalle.producto.nombre,
+                            'cantidad': detalle.cantidad,
+                            'precio_unitario': self._format_money(detalle.precio_unitario),
+                        }
+                        for detalle in venta.detalles.all()
+                    ],
+                })
 
         resultado_cuentas = []
         for cuenta in cuentas:
             ventas = ventas_por_cuenta.get(cuenta.id, [])
+            pagos = pagos_por_cuenta.get(cuenta.id, [])
             total_cuenta = sum(venta['total'] for venta in ventas)
+            total_pendiente = sum(venta['saldo'] for venta in ventas)
+            total_pagado = sum(pago['monto'] for pago in pagos)
             resultado_cuentas.append({
                 'cuenta_id': cuenta.id,
                 'nombre_departamento': cuenta.nombre_departamento,
                 'responsable': cuenta.responsable,
                 'cantidad_ventas': len(ventas),
                 'total_ventas': round(total_cuenta, 2),
+                'total_pendiente': round(total_pendiente, 2),
+                'total_pagado': round(total_pagado, 2),
                 'ventas': ventas,
+                'pagos': pagos,
             })
 
         return Response({
@@ -630,6 +756,7 @@ class CuentaAbiertaResumenView(APIView):
                 'fecha_desde': fecha_desde.isoformat() if fecha_desde else None,
                 'fecha_hasta': fecha_hasta.isoformat() if fecha_hasta else None,
             },
+            'modo_compatibilidad': modo_compatibilidad,
             'cuentas': resultado_cuentas,
         })
 

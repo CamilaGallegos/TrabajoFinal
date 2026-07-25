@@ -169,7 +169,7 @@ export function useAuth(options = {}) {
       requierePassword.value = false
       loginAdmin.value = false
       if (expirada) {
-        errorMensaje.value = 'Una sesion expiro. Vuelve a ingresar DNI para continuar.'
+        errorMensaje.value = 'Se cerró la sesión. Vuelve a ingresar DNI para continuar.'
       }
       if (onLogout) {
         onLogout()

@@ -48,7 +48,7 @@ class ProductoSerializer(serializers.ModelSerializer):
 class CuentaAbiertaSerializer(serializers.ModelSerializer):
     class Meta:
         model = CuentaAbierta
-        fields = ['id', 'nombre_departamento', 'responsable']
+        fields = ['id', 'nombre_departamento', 'responsable', 'activo']
 
 
 class VentaItemCreateSerializer(serializers.Serializer):

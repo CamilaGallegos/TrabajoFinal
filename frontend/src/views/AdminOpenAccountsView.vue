@@ -15,9 +15,13 @@ const cuentasExpandida = ref({})
 const exportando = ref({})
 const modalPagoAbierto = ref(false)
 const modalHistorialAbierto = ref(false)
+const modalCuentaAbierta = ref(false)
 const registrandoPago = ref(false)
+const guardandoCuenta = ref(false)
 const errorPago = ref('')
+const errorCuenta = ref('')
 const pagoExpandidoId = ref(null)
+const modoCuentaAbierta = ref('create')
 
 const pagoForm = ref({
   monto: '',
@@ -25,6 +29,12 @@ const pagoForm = ref({
   fecha_pago: '',
   referencia: '',
   observaciones: '',
+})
+
+const cuentaForm = ref({
+  nombre_departamento: '',
+  responsable: '',
+  activo: true,
 })
 
 const formatMoney = (value) => {
@@ -229,7 +239,7 @@ const cuentaSeleccionada = computed(() => {
 const opcionesCuentas = computed(() => {
   return cuentas.value.map((cuenta) => ({
     value: String(cuenta.cuenta_id),
-    label: `${cuenta.nombre_departamento}`,
+    label: `${cuenta.nombre_departamento}${cuenta.activo === false ? ' (Inactiva)' : ''}`,
   }))
 })
 
@@ -293,6 +303,99 @@ const limpiarFiltros = () => {
   fechaDesde.value = ''
   fechaHasta.value = ''
   cargarResumen()
+}
+
+const abrirModalCrearCuenta = () => {
+  modoCuentaAbierta.value = 'create'
+  errorCuenta.value = ''
+  cuentaForm.value = {
+    nombre_departamento: '',
+    responsable: '',
+    activo: true,
+  }
+  modalCuentaAbierta.value = true
+}
+
+const abrirModalEditarCuenta = () => {
+  if (!cuentaSeleccionada.value) {
+    return
+  }
+
+  modoCuentaAbierta.value = 'edit'
+  errorCuenta.value = ''
+  cuentaForm.value = {
+    nombre_departamento: cuentaSeleccionada.value.nombre_departamento || '',
+    responsable: cuentaSeleccionada.value.responsable || '',
+    activo: cuentaSeleccionada.value.activo !== false,
+  }
+  modalCuentaAbierta.value = true
+}
+
+const cerrarModalCuenta = () => {
+  modalCuentaAbierta.value = false
+  errorCuenta.value = ''
+  guardandoCuenta.value = false
+}
+
+const guardarCuenta = async () => {
+  const nombre = String(cuentaForm.value.nombre_departamento || '').trim()
+  if (!nombre) {
+    errorCuenta.value = 'El nombre de la cuenta es obligatorio'
+    return
+  }
+
+  guardandoCuenta.value = true
+  errorCuenta.value = ''
+
+  try {
+    const payload = {
+      nombre_departamento: nombre,
+      responsable: String(cuentaForm.value.responsable || '').trim(),
+      activo: cuentaForm.value.activo !== false,
+    }
+
+    if (modoCuentaAbierta.value === 'edit' && cuentaSeleccionada.value) {
+      await axios.patch(`http://localhost:8000/api/cuentas-abiertas/${cuentaSeleccionada.value.cuenta_id}/`, payload)
+    } else {
+      await axios.post('http://localhost:8000/api/cuentas-abiertas/', payload)
+    }
+
+    await cargarResumen()
+    cerrarModalCuenta()
+  } catch (err) {
+    const apiError = err?.response?.data
+    if (typeof apiError === 'string') {
+      errorCuenta.value = apiError
+    } else if (apiError?.nombre_departamento?.[0]) {
+      errorCuenta.value = apiError.nombre_departamento[0]
+    } else if (apiError?.detail) {
+      errorCuenta.value = apiError.detail
+    } else {
+      errorCuenta.value = 'No se pudo guardar la cuenta.'
+    }
+  } finally {
+    guardandoCuenta.value = false
+  }
+}
+
+const inhabilitarCuentaSeleccionada = async () => {
+  if (!cuentaSeleccionada.value) {
+    return
+  }
+
+  const confirmar = window.confirm(`¿Querés inhabilitar la cuenta "${cuentaSeleccionada.value.nombre_departamento}"?`)
+  if (!confirmar) {
+    return
+  }
+
+  try {
+    await axios.patch(`http://localhost:8000/api/cuentas-abiertas/${cuentaSeleccionada.value.cuenta_id}/`, {
+      activo: false,
+    })
+    await cargarResumen()
+  } catch (err) {
+    error.value = 'No se pudo inhabilitar la cuenta'
+  }
 }
 
 const abrirModalPago = () => {
@@ -396,6 +499,16 @@ onMounted(() => {
       </div>
 
       <div class="filters-actions">
+        <div class="header-actions">
+          <button type="button" class="btn-secondary" @click="abrirModalCrearCuenta">Crear cuenta</button>
+          <button type="button" class="btn-secondary" :disabled="!cuentaSeleccionada" @click="abrirModalEditarCuenta">
+            Editar cuenta
+          </button>
+          <button type="button" class="btn-secondary" :disabled="!cuentaSeleccionada" @click="inhabilitarCuentaSeleccionada">
+            Inhabilitar cuenta
+          </button>
+        </div>
+
         <label class="cuenta-selector">
           Cuenta
           <select :value="cuentaSeleccionadaId" @change="cambiarCuentaSeleccionada">
@@ -512,6 +625,36 @@ onMounted(() => {
         </div>
       </article>
     </section>
+
+    <div v-if="modalCuentaAbierta" class="modal-overlay" @click.self="cerrarModalCuenta">
+      <section class="modal-card">
+        <header>
+          <h3>{{ modoCuentaAbierta === 'edit' ? 'Editar cuenta' : 'Crear cuenta' }}</h3>
+          <p>{{ cuentaSeleccionada?.nombre_departamento || 'Nueva cuenta abierta' }}</p>
+        </header>
+
+        <div class="form-grid">
+          <label class="full-width">
+            Nombre de la cuenta
+            <input v-model="cuentaForm.nombre_departamento" type="text" maxlength="100" />
+          </label>
+
+          <label class="full-width">
+            Responsable
+            <input v-model="cuentaForm.responsable" type="text" maxlength="100" />
+          </label>
+        </div>
+
+        <p v-if="errorCuenta" class="estado-msg error">{{ errorCuenta }}</p>
+
+        <footer class="modal-actions">
+          <button type="button" class="btn-secondary" @click="cerrarModalCuenta">Cancelar</button>
+          <button type="button" class="btn-primary" :disabled="guardandoCuenta" @click="guardarCuenta">
+            {{ guardandoCuenta ? 'Guardando...' : (modoCuentaAbierta === 'edit' ? 'Guardar cambios' : 'Crear cuenta') }}
+          </button>
+        </footer>
+      </section>
+    </div>
 
     <div v-if="modalPagoAbierto" class="modal-overlay" @click.self="cerrarModalPago">
       <section class="modal-card">
@@ -657,6 +800,12 @@ onMounted(() => {
   display: flex;
   align-items: end;
   gap: 10px;
+  flex-wrap: wrap;
+}
+
+.header-actions {
+  display: flex;
+  gap: 8px;
   flex-wrap: wrap;
 }
 

@@ -49,9 +49,15 @@ class ProductoViewSet(viewsets.ModelViewSet):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
-class CuentaAbiertaViewSet(viewsets.ReadOnlyModelViewSet):
+class CuentaAbiertaViewSet(viewsets.ModelViewSet):
     queryset = CuentaAbierta.objects.all().order_by('nombre_departamento')
     serializer_class = CuentaAbiertaSerializer
+
+    def get_queryset(self):
+        queryset = CuentaAbierta.objects.all().order_by('nombre_departamento')
+        if str(self.request.query_params.get('incluye_inactivas', '')).lower() in {'1', 'true', 'si', 'yes'}:
+            return queryset
+        return queryset.filter(activo=True)
 
 
 class PagoCuentaAbiertaViewSet(mixins.ListModelMixin, mixins.CreateModelMixin, viewsets.GenericViewSet):
@@ -851,6 +857,7 @@ class CuentaAbiertaResumenView(APIView):
                 'cuenta_id': cuenta.id,
                 'nombre_departamento': cuenta.nombre_departamento,
                 'responsable': cuenta.responsable,
+                'activo': cuenta.activo,
                 'cantidad_ventas': len(ventas),
                 'total_ventas': round(total_cuenta, 2),
                 'total_pendiente': round(total_pendiente, 2),

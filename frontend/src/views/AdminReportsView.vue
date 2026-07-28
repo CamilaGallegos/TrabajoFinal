@@ -894,8 +894,8 @@ onMounted(() => {
   <div class="reports-container">
     <header class="reports-header">
       <div>
-        <h2>Reportes</h2>
-        <p>Acá podes ver diferentes reportes y estadísticas</p>
+        <h1>Estadísticas</h1>
+        <p>Acá podes ver diferentes graficos que muestran datos relevantes para la gestión de la fotocopiadora</p>
       </div>
 
     </header>
@@ -1168,7 +1168,7 @@ onMounted(() => {
   background: linear-gradient(135deg, #ffffff 0%, #f3f9fc 100%);
 }
 
-.reports-header h2 {
+.reports-header h1 {
   margin: 0 0 6px;
   color: #08324a;
 }
@@ -1176,7 +1176,8 @@ onMounted(() => {
 .reports-header p {
   margin: 0;
   color: #5b6b79;
-  max-width: 560px;
+  max-width: none;
+  width: 100%;
 }
 
 .reports-actions {

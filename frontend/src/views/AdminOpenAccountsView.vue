@@ -392,6 +392,7 @@ onMounted(() => {
     <header class="open-accounts-header">
       <div>
         <h2>Cuentas abiertas</h2>
+        <p>Acá podes ver un resumen de cada cuenta abierta, registrar pagos y exportar la información</p>
       </div>
 
       <div class="filters-actions">

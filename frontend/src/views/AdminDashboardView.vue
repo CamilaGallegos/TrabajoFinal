@@ -9,11 +9,11 @@ const route = useRoute()
 const secciones = [
   { id: 'inicio', label: 'Inicio', route: 'admin-home' },
   { id: 'asistencia', label: 'Asistencia', route: 'admin-attendance' },
-  { id: 'stock', label: 'Stock', route: 'admin-stock' },
+  { id: 'stock', label: 'Productos', route: 'admin-stock' },
   { id: 'historial', label: 'Historial de ventas', route: 'admin-history' },
   { id: 'auditoria', label: 'Auditoría', route: 'admin-audit' },
   { id: 'cuentas-abiertas', label: 'Cuenta abiertas', route: 'admin-open-accounts' },
-  { id: 'reportes', label: 'Reportes', route: 'admin-reports' },
+  { id: 'reportes', label: 'Estadísticas', route: 'admin-reports' },
 ]
 
 const seleccionarSeccion = (item) => {

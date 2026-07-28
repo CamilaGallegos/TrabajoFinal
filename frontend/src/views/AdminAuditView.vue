@@ -349,13 +349,13 @@ onBeforeUnmount(() => {
 
 .audit-header {
   display: flex;
-  align-items: flex-start;
   justify-content: space-between;
-  gap: 20px;
+  align-items: flex-start;
+  gap: 16px;
   padding: 20px;
-  border-radius: 16px;
-  background: #ffffff;
   border: 1px solid #d8dde6;
+  border-radius: 16px;
+  background: linear-gradient(135deg, #ffffff 0%, #f3f9fc 100%);
 }
 
 .btn-refresh {
@@ -373,16 +373,15 @@ onBeforeUnmount(() => {
 }
 
 .audit-header h1 {
-  margin: 0 0 8px;
+  margin: 0 0 6px;
   color: #08324a;
-  font-size: clamp(1.5rem, 2vw, 2rem);
 }
 
 .audit-header p {
   margin: 0;
-  color: #475569;
-  line-height: 1.6;
-  max-width: 640px;
+  color: #5b6b79;
+  max-width: none;
+  width: 100%;
 }
 
 .feedback-banner {

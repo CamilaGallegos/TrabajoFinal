@@ -30,7 +30,57 @@ from .serializers import (
     AuditoriaVentaSerializer,
     PagoCuentaAbiertaSerializer,
     PagoCuentaAbiertaCreateSerializer,
+    PerfilBecadoAdminSerializer,
+    PerfilBecadoCreateSerializer,
 )
+
+
+class PerfilBecadoAdminViewSet(mixins.ListModelMixin, mixins.CreateModelMixin, mixins.UpdateModelMixin, viewsets.GenericViewSet):
+    queryset = PerfilBecado.objects.select_related('user').all().order_by('user__first_name', 'user__last_name', 'dni')
+
+    def get_serializer_class(self):
+        if self.action == 'create':
+            return PerfilBecadoCreateSerializer
+        return PerfilBecadoAdminSerializer
+
+    def _validar_admin(self, request):
+        if not (request.user and request.user.is_authenticated and (request.user.is_staff or request.user.is_superuser)):
+            raise PermissionDenied('Solo administradores pueden gestionar becados.')
+
+    def list(self, request, *args, **kwargs):
+        self._validar_admin(request)
+        return super().list(request, *args, **kwargs)
+
+    def create(self, request, *args, **kwargs):
+        self._validar_admin(request)
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        perfil = serializer.save()
+        response_serializer = PerfilBecadoAdminSerializer(perfil)
+        return Response(response_serializer.data, status=status.HTTP_201_CREATED)
+
+    def partial_update(self, request, *args, **kwargs):
+        self._validar_admin(request)
+        perfil = self.get_object()
+        if 'activo' not in request.data:
+            return Response({'detail': 'Debe enviar el campo activo.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        valor_activo = request.data.get('activo')
+        if isinstance(valor_activo, bool):
+            activo = valor_activo
+        else:
+            activo = str(valor_activo).strip().lower() in {'1', 'true', 'si', 'yes'}
+
+        if perfil.user_id == request.user.id and not activo:
+            return Response(
+                {'detail': 'No podes inhabilitar tu propio usuario mientras esta en uso.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        perfil.user.is_active = activo
+        perfil.user.save(update_fields=['is_active'])
+        response_serializer = PerfilBecadoAdminSerializer(perfil)
+        return Response(response_serializer.data, status=status.HTTP_200_OK)
 
 class ProductoViewSet(viewsets.ModelViewSet):
     # List only active products by default
@@ -141,6 +191,10 @@ class FichajeEntradaView(APIView):
         try:
             becado = PerfilBecado.objects.select_related('user').get(dni=dni_recibido)
             usuario = becado.user
+
+            if not usuario.is_active:
+                return Response({"error": "Usuario inhabilitado"}, status=status.HTTP_403_FORBIDDEN)
+
             es_admin = bool(usuario.is_staff or usuario.is_superuser)
 
             if es_admin:
@@ -346,6 +400,7 @@ class AsistenciaResumenView(APIView):
             grupo = grupos.setdefault(asistencia.becado_id, {
                 'becado_id': asistencia.becado_id,
                 'nombre_usuario': nombre_completo,
+                    'activo': bool(usuario.is_active),
                 'asistencias': [],
                 '_minutos_total': 0,
             })

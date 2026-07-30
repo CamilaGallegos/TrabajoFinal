@@ -1,12 +1,13 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 
-from .views import ProductoViewSet, FichajeEntradaView, FichajeSalidaView, CuentaAbiertaViewSet, VentaViewSet, AuditoriaVentaViewSet, ActividadSesionesView, AsistenciaResumenView, ReporteDashboardResumenView, CuentaAbiertaResumenView, PagoCuentaAbiertaViewSet, CuentaAbiertaEvolucionMensualView
+from .views import ProductoViewSet, FichajeEntradaView, FichajeSalidaView, CuentaAbiertaViewSet, VentaViewSet, AuditoriaVentaViewSet, ActividadSesionesView, AsistenciaResumenView, ReporteDashboardResumenView, CuentaAbiertaResumenView, PagoCuentaAbiertaViewSet, CuentaAbiertaEvolucionMensualView, PerfilBecadoAdminViewSet
 
 router = DefaultRouter()
 router.register(r'productos', ProductoViewSet)
 router.register(r'cuentas-abiertas', CuentaAbiertaViewSet)
 router.register(r'cuentas-abiertas-pagos', PagoCuentaAbiertaViewSet, basename='cuentas-abiertas-pagos')
+router.register(r'becados-admin', PerfilBecadoAdminViewSet, basename='becados-admin')
 router.register(r'ventas', VentaViewSet, basename='ventas')
 router.register(r'auditorias', AuditoriaVentaViewSet, basename='auditorias')
 

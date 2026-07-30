@@ -7,6 +7,16 @@ const mesSeleccionado = ref('')
 const cargando = ref(false)
 const error = ref('')
 const usuariosExpandido = ref({})
+const modalUsuarioAbierto = ref(false)
+const creandoUsuario = ref(false)
+const errorUsuario = ref('')
+
+const usuarioForm = ref({
+  nombre: '',
+  apellido: '',
+  dni: '',
+  legajo: '',
+})
 
 const formatearFecha = (fechaIso) => {
   if (!fechaIso) return 'Sin horario'
@@ -25,12 +35,6 @@ const mesActualValor = () => {
   return `${hoy.getFullYear()}-${String(hoy.getMonth() + 1).padStart(2, '0')}`
 }
 
-const mesAnteriorValor = () => {
-  const hoy = new Date()
-  const anterior = new Date(hoy.getFullYear(), hoy.getMonth() - 1, 1)
-  return `${anterior.getFullYear()}-${String(anterior.getMonth() + 1).padStart(2, '0')}`
-}
-
 const cargarResumen = async () => {
   cargando.value = true
   error.value = ''
@@ -47,19 +51,103 @@ const cargarResumen = async () => {
   } catch (err) {
     resumen.value = { actual: null, anterior: null, seleccionado: null }
     usuariosExpandido.value = {}
-    error.value = 'Error al cargar las asistencias'
+    const status = err?.response?.status
+    if (status === 401 || status === 403) {
+      error.value = 'No autorizado. Es posible que tu sesión haya expirado o tu usuario esté inhabilitado.'
+    } else {
+      error.value = 'Error al cargar las asistencias'
+    }
   } finally {
     cargando.value = false
   }
 }
 
-const secciones = computed(() => ([
-  { key: 'actual', titulo: 'Mes actual', descripcion: 'Todas las asistencias de este mes' },
-  { key: 'anterior', titulo: 'Mes anterior', descripcion: 'Total de horas y asistencias del mes pasado' },
-  { key: 'seleccionado', titulo: 'Mes elegido', descripcion: 'Asistencias del mes seleccionado' },
-]))
+const abrirModalUsuario = () => {
+  errorUsuario.value = ''
+  usuarioForm.value = {
+    nombre: '',
+    apellido: '',
+    dni: '',
+    legajo: '',
+  }
+  modalUsuarioAbierto.value = true
+}
+
+const cerrarModalUsuario = () => {
+  modalUsuarioAbierto.value = false
+  errorUsuario.value = ''
+}
+
+const crearUsuario = async () => {
+  if (!String(usuarioForm.value.nombre || '').trim() || !String(usuarioForm.value.dni || '').trim()) {
+    errorUsuario.value = 'Nombre y DNI son obligatorios.'
+    return
+  }
+
+  creandoUsuario.value = true
+  errorUsuario.value = ''
+
+  try {
+    const payload = {
+      nombre: String(usuarioForm.value.nombre || '').trim(),
+      apellido: String(usuarioForm.value.apellido || '').trim(),
+      dni: String(usuarioForm.value.dni || '').trim(),
+      legajo: String(usuarioForm.value.legajo || '').trim(),
+    }
+
+    await axios.post('http://localhost:8000/api/becados-admin/', payload)
+    await cargarResumen()
+    cerrarModalUsuario()
+  } catch (err) {
+    const apiError = err?.response?.data
+    if (typeof apiError === 'string') {
+      errorUsuario.value = apiError
+    } else if (apiError?.dni?.[0]) {
+      errorUsuario.value = apiError.dni[0]
+    } else if (apiError?.detail) {
+      errorUsuario.value = apiError.detail
+    } else {
+      errorUsuario.value = 'No se pudo crear el usuario.'
+    }
+  } finally {
+    creandoUsuario.value = false
+  }
+}
+
+const cambiarEstadoUsuario = async (usuario, activo) => {
+  if (!usuario?.becado_id) {
+    return
+  }
+
+  const accion = activo ? 'habilitar' : 'inhabilitar'
+  const confirmar = window.confirm(`¿Querés ${accion} a ${usuario.nombre_usuario}?`)
+  if (!confirmar) {
+    return
+  }
+
+  try {
+    await axios.patch(`http://localhost:8000/api/becados-admin/${usuario.becado_id}/`, { activo })
+    await cargarResumen()
+  } catch (err) {
+    error.value = 'No se pudo actualizar el estado del usuario.'
+  }
+}
 
 const resumenMes = (clave) => resumen.value?.[clave] || { usuarios: [], cantidad_asistencias: 0, total_horas: 0, label: '' }
+
+const mesActualSeleccionado = computed(() => {
+  const seleccionado = mesSeleccionado.value || mesActualValor()
+  return seleccionado === mesActualValor()
+})
+
+const panelTitulo = computed(() => (mesActualSeleccionado.value ? 'Mes actual' : 'Mes elegido'))
+const panelDescripcion = computed(() => (
+  mesActualSeleccionado.value
+    ? 'Todas las asistencias de este mes'
+    : 'Asistencias del mes seleccionado'
+))
+
+const resumenVisible = computed(() => resumenMes('seleccionado'))
 
 const totalHorasTexto = (valor) => {
   const horasDecimal = Number(valor || 0)
@@ -118,6 +206,7 @@ onMounted(() => {
       </div>
 
       <div class="attendance-actions">
+        <button type="button" class="btn-secondary" @click="abrirModalUsuario">Crear usuario</button>
         <input v-model="mesSeleccionado" type="month" class="month-input" />
         <button type="button" class="btn-refresh" @click="cargarResumen">Actualizar</button>
       </div>
@@ -127,29 +216,39 @@ onMounted(() => {
     <div v-else-if="error" class="estado-msg error">{{ error }}</div>
 
     <section v-else class="attendance-grid">
-      <article v-for="seccion in secciones" :key="seccion.key" class="attendance-panel">
+      <article class="attendance-panel">
         <header class="panel-header">
           <div>
-            <h3>{{ seccion.titulo }}</h3>
-            <p>{{ seccion.descripcion }}</p>
+            <h3>{{ panelTitulo }}</h3>
+            <p>{{ panelDescripcion }}</p>
           </div>
           <div class="panel-meta">
-            <span v-if="resumenMes(seccion.key).label">{{ resumenMes(seccion.key).label }}</span>
-            <strong>{{ totalHorasTexto(resumenMes(seccion.key).total_horas) }}</strong>
-            <small>{{ resumenMes(seccion.key).cantidad_asistencias }} asistencias</small>
+            <span v-if="resumenVisible.label">{{ resumenVisible.label }}</span>
+            <strong>{{ totalHorasTexto(resumenVisible.total_horas) }}</strong>
+            <small>{{ resumenVisible.cantidad_asistencias }} asistencias</small>
           </div>
         </header>
 
-        <div v-if="resumenMes(seccion.key).usuarios.length === 0" class="estado-msg">
+        <div v-if="resumenVisible.usuarios.length === 0" class="estado-msg">
           No hay asistencias para este período
         </div>
 
         <div v-else class="usuarios-lista">
-          <article v-for="usuario in resumenMes(seccion.key).usuarios" :key="usuario.becado_id" class="usuario-card">
+          <article v-for="usuario in resumenVisible.usuarios" :key="usuario.becado_id" class="usuario-card">
             <header class="usuario-header">
               <div>
                 <h4>{{ usuario.nombre_usuario }}</h4>
                 <p>Total del mes: {{ totalHorasTexto(usuario.total_horas) }}</p>
+              </div>
+              <div class="usuario-actions">
+                <span v-if="usuario.activo === false" class="estado-chip">Inhabilitado</span>
+                <button
+                  type="button"
+                  class="btn-secondary"
+                  @click="cambiarEstadoUsuario(usuario, usuario.activo === false)"
+                >
+                  {{ usuario.activo === false ? 'Habilitar' : 'Inhabilitar' }}
+                </button>
               </div>
             </header>
 
@@ -162,7 +261,7 @@ onMounted(() => {
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="asistencia in asistenciasVisibles(seccion.key, usuario)" :key="asistencia.id">
+                <tr v-for="asistencia in asistenciasVisibles('seleccionado', usuario)" :key="asistencia.id">
                   <td>{{ formatearFecha(asistencia.entrada) }}</td>
                   <td>{{ textoSalida(asistencia) }}</td>
                   <td class="right">{{ totalHorasTexto(asistencia.horas) }}</td>
@@ -174,15 +273,55 @@ onMounted(() => {
               <button
                 type="button"
                 class="btn-link"
-                @click="alternarUsuarioExpandido(seccion.key, usuario.becado_id)"
+                @click="alternarUsuarioExpandido('seleccionado', usuario.becado_id)"
               >
-                {{ usuarioEstaExpandido(seccion.key, usuario.becado_id) ? 'Ver menos' : 'Ver más' }}
+                {{ usuarioEstaExpandido('seleccionado', usuario.becado_id) ? 'Ver menos' : 'Ver más' }}
               </button>
             </div>
           </article>
         </div>
       </article>
     </section>
+
+    <div v-if="modalUsuarioAbierto" class="modal-overlay" @click.self="cerrarModalUsuario">
+      <section class="modal-card">
+        <header>
+          <h3>Crear usuario</h3>
+          <p>Alta de nuevo becado para fichaje</p>
+        </header>
+
+        <div class="form-grid">
+          <label>
+            Nombre
+            <input v-model="usuarioForm.nombre" type="text" maxlength="150" />
+          </label>
+
+          <label>
+            Apellido
+            <input v-model="usuarioForm.apellido" type="text" maxlength="150" />
+          </label>
+
+          <label>
+            DNI
+            <input v-model="usuarioForm.dni" type="text" maxlength="15" />
+          </label>
+
+          <label>
+            Legajo
+            <input v-model="usuarioForm.legajo" type="text" maxlength="20" />
+          </label>
+        </div>
+
+        <p v-if="errorUsuario" class="estado-msg error">{{ errorUsuario }}</p>
+
+        <footer class="modal-actions">
+          <button type="button" class="btn-secondary" @click="cerrarModalUsuario">Cancelar</button>
+          <button type="button" class="btn-refresh" :disabled="creandoUsuario" @click="crearUsuario">
+            {{ creandoUsuario ? 'Creando...' : 'Crear usuario' }}
+          </button>
+        </footer>
+      </section>
+    </div>
   </div>
 </template>
 
@@ -218,6 +357,25 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 10px;
+}
+
+.btn-secondary {
+  border: 0;
+  border-radius: 10px;
+  padding: 8px 12px;
+  background: #e2e8f0;
+  color: #0f172a;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.btn-secondary:hover {
+  background: #cbd5e1;
+}
+
+.btn-secondary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .month-input {
@@ -324,6 +482,21 @@ onMounted(() => {
   margin-bottom: 12px;
 }
 
+.usuario-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.estado-chip {
+  border-radius: 999px;
+  padding: 4px 8px;
+  font-size: 11px;
+  font-weight: 700;
+  background: #fee2e2;
+  color: #991b1b;
+}
+
 .usuario-header h4 {
   margin: 0 0 4px;
   color: #0f172a;
@@ -384,6 +557,65 @@ onMounted(() => {
   text-align: right;
 }
 
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  z-index: 20;
+}
+
+.modal-card {
+  width: min(640px, 100%);
+  background: #ffffff;
+  border-radius: 16px;
+  border: 1px solid #d8dde6;
+  padding: 16px;
+  display: grid;
+  gap: 12px;
+}
+
+.modal-card h3 {
+  margin: 0;
+  color: #0f172a;
+}
+
+.modal-card p {
+  margin: 4px 0 0;
+  color: #64748b;
+  font-size: 13px;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.form-grid label {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+  color: #475569;
+  font-weight: 600;
+}
+
+.form-grid input {
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  padding: 8px 10px;
+  color: #0f172a;
+  font: inherit;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 @media (max-width: 760px) {
   .attendance-header,
   .panel-header {
@@ -393,6 +625,14 @@ onMounted(() => {
   .attendance-actions {
     width: 100%;
     flex-wrap: wrap;
+  }
+
+  .usuario-header {
+    flex-direction: column;
+  }
+
+  .form-grid {
+    grid-template-columns: 1fr;
   }
 
   .panel-meta {

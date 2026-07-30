@@ -1,4 +1,5 @@
 from decimal import Decimal
+from django.contrib.auth.models import User
 from django.db import transaction
 from django.db.models import Sum
 from django.utils import timezone
@@ -7,6 +8,7 @@ from rest_framework import serializers
 from .models import (
     Producto,
     Categoria,
+    PerfilBecado,
     CuentaAbierta,
     Venta,
     DetalleVenta,
@@ -49,6 +51,57 @@ class CuentaAbiertaSerializer(serializers.ModelSerializer):
     class Meta:
         model = CuentaAbierta
         fields = ['id', 'nombre_departamento', 'responsable', 'activo']
+
+
+class PerfilBecadoAdminSerializer(serializers.ModelSerializer):
+    nombre = serializers.CharField(source='user.first_name', read_only=True)
+    apellido = serializers.CharField(source='user.last_name', read_only=True)
+    username = serializers.CharField(source='user.username', read_only=True)
+    activo = serializers.BooleanField(source='user.is_active', read_only=True)
+
+    class Meta:
+        model = PerfilBecado
+        fields = ['id', 'nombre', 'apellido', 'username', 'dni', 'legajo', 'activo']
+
+
+class PerfilBecadoCreateSerializer(serializers.Serializer):
+    nombre = serializers.CharField(max_length=150)
+    apellido = serializers.CharField(required=False, allow_blank=True, max_length=150)
+    dni = serializers.CharField(max_length=15)
+    legajo = serializers.CharField(required=False, allow_blank=True, allow_null=True, max_length=20)
+
+    def validate_dni(self, value):
+        dni = str(value).strip()
+        if not dni:
+            raise serializers.ValidationError('El DNI es obligatorio.')
+        if PerfilBecado.objects.filter(dni=dni).exists():
+            raise serializers.ValidationError('Ya existe un becado con ese DNI.')
+        if User.objects.filter(username=dni).exists():
+            raise serializers.ValidationError('Ya existe un usuario con ese DNI.')
+        return dni
+
+    @transaction.atomic
+    def create(self, validated_data):
+        nombre = validated_data['nombre'].strip()
+        apellido = str(validated_data.get('apellido') or '').strip()
+        dni = validated_data['dni']
+        legajo = validated_data.get('legajo') or None
+
+        user = User.objects.create(
+            username=dni,
+            first_name=nombre,
+            last_name=apellido,
+            is_active=True,
+        )
+        user.set_unusable_password()
+        user.save(update_fields=['password'])
+
+        perfil = PerfilBecado.objects.create(
+            user=user,
+            dni=dni,
+            legajo=legajo,
+        )
+        return perfil
 
 
 class VentaItemCreateSerializer(serializers.Serializer):

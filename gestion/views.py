@@ -10,6 +10,7 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import AccessToken
+from django.conf import settings as django_settings
 
 from .models import (
     Producto,
@@ -81,6 +82,18 @@ class PerfilBecadoAdminViewSet(mixins.ListModelMixin, mixins.CreateModelMixin, m
         perfil.user.save(update_fields=['is_active'])
         response_serializer = PerfilBecadoAdminSerializer(perfil)
         return Response(response_serializer.data, status=status.HTTP_200_OK)
+
+
+def _get_access_token_lifetime():
+    jwt_config = getattr(django_settings, 'SIMPLE_JWT', {}) or {}
+    configured = jwt_config.get('ACCESS_TOKEN_LIFETIME')
+    if isinstance(configured, timedelta) and configured.total_seconds() > 0:
+        return configured
+    return timedelta(hours=7)
+
+
+def _expiracion_desde_asistencia(asistencia):
+    return asistencia.entrada + _get_access_token_lifetime()
 
 class ProductoViewSet(viewsets.ModelViewSet):
     # List only active products by default
@@ -219,11 +232,20 @@ class FichajeEntradaView(APIView):
 
             if not es_admin:
                 inicio_hoy = timezone.now().replace(hour=0, minute=0, second=0, microsecond=0)
-                Asistencia.objects.filter(
+                sesiones_abiertas_anteriores = Asistencia.objects.filter(
                     becado=becado,
                     salida__isnull=True,
                     entrada__lt=inicio_hoy,
-                ).update(salida=timezone.now())
+                )
+                for sesion_abierta in sesiones_abiertas_anteriores:
+                    salida_forzada = min(timezone.now(), _expiracion_desde_asistencia(sesion_abierta))
+                    try:
+                        sesion_abierta.salida = salida_forzada
+                        sesion_abierta.salida_motivo = Asistencia.MOTIVO_SIN_CIERRE
+                        sesion_abierta.save(update_fields=['salida', 'salida_motivo'])
+                    except (ProgrammingError, OperationalError):
+                        sesion_abierta.salida = salida_forzada
+                        sesion_abierta.save(update_fields=['salida'])
 
                 hoy = timezone.now().date()
                 asistencia_existente = Asistencia.objects.filter(
@@ -272,9 +294,9 @@ class FichajeSalidaView(APIView):
 
         try:
             import jwt as pyjwt
-            from django.conf import settings as django_settings
             payload = pyjwt.decode(token_str, options={"verify_signature": False})
             user_id = payload.get('user_id')
+            token_exp = payload.get('exp')
         except Exception:
             return Response({"msg": "Token inválido."}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -301,8 +323,36 @@ class FichajeSalidaView(APIView):
         if not asistencia_abierta:
             return Response({"msg": "No hay asistencia activa para cerrar."}, status=status.HTTP_200_OK)
 
-        asistencia_abierta.salida = timezone.now()
-        asistencia_abierta.save(update_fields=['salida'])
+        motivo_salida = str(request.data.get('motivo') or Asistencia.MOTIVO_MANUAL).strip().lower()
+        motivos_validos = {key for key, _ in Asistencia.MOTIVO_SALIDA_CHOICES}
+        if motivo_salida not in motivos_validos:
+            motivo_salida = Asistencia.MOTIVO_MANUAL
+
+        ahora = timezone.now()
+        salida_calculada = ahora
+        if motivo_salida == Asistencia.MOTIVO_EXPIRADA:
+            expiracion_por_entrada = _expiracion_desde_asistencia(asistencia_abierta)
+            expiracion_por_token = None
+            if token_exp:
+                try:
+                    expiracion_por_token = datetime.fromtimestamp(int(token_exp), tz=ZoneInfo('UTC'))
+                except (TypeError, ValueError, OSError):
+                    expiracion_por_token = None
+
+            if expiracion_por_token is not None:
+                salida_calculada = min(ahora, expiracion_por_entrada, expiracion_por_token)
+            else:
+                salida_calculada = min(ahora, expiracion_por_entrada)
+
+            if salida_calculada < asistencia_abierta.entrada:
+                salida_calculada = asistencia_abierta.entrada
+
+        asistencia_abierta.salida = salida_calculada
+        try:
+            asistencia_abierta.salida_motivo = motivo_salida
+            asistencia_abierta.save(update_fields=['salida', 'salida_motivo'])
+        except (ProgrammingError, OperationalError):
+            asistencia_abierta.save(update_fields=['salida'])
 
         return Response({"msg": "Salida registrada correctamente."}, status=status.HTTP_200_OK)
 
@@ -381,6 +431,11 @@ class AsistenciaResumenView(APIView):
     def _asistencia_duracion_minutos(self, asistencia, fin_periodo):
         ahora = timezone.now()
         salida = asistencia.salida or min(fin_periodo, ahora)
+
+        # no debe superar ACCESS_TOKEN_LIFETIME.
+        if asistencia.salida_motivo == Asistencia.MOTIVO_EXPIRADA:
+            salida = min(salida, _expiracion_desde_asistencia(asistencia))
+
         if salida < asistencia.entrada:
             return 0
         delta = salida - asistencia.entrada
@@ -394,26 +449,77 @@ class AsistenciaResumenView(APIView):
         ).order_by('becado__user__first_name', 'becado__user__last_name', 'entrada')
 
         grupos = {}
-        for asistencia in asistencias:
-            usuario = asistencia.becado.user
-            nombre_completo = f"{usuario.first_name} {usuario.last_name}".strip() or usuario.username
-            grupo = grupos.setdefault(asistencia.becado_id, {
-                'becado_id': asistencia.becado_id,
-                'nombre_usuario': nombre_completo,
+        try:
+            for asistencia in asistencias:
+                usuario = asistencia.becado.user
+                nombre_completo = f"{usuario.first_name} {usuario.last_name}".strip() or usuario.username
+                grupo = grupos.setdefault(asistencia.becado_id, {
+                    'becado_id': asistencia.becado_id,
+                    'nombre_usuario': nombre_completo,
                     'activo': bool(usuario.is_active),
-                'asistencias': [],
-                '_minutos_total': 0,
-            })
+                    'asistencias': [],
+                    '_minutos_total': 0,
+                })
 
-            duracion_minutos = self._asistencia_duracion_minutos(asistencia, fin)
-            grupo['_minutos_total'] += duracion_minutos
-            grupo['asistencias'].append({
-                'id': asistencia.id,
-                'entrada': asistencia.entrada.isoformat(),
-                'salida': asistencia.salida.isoformat() if asistencia.salida else None,
-                'estado': 'activo' if asistencia.salida is None else 'cerrada',
-                'horas': self._format_horas(duracion_minutos),
-            })
+                duracion_minutos = self._asistencia_duracion_minutos(asistencia, fin)
+                grupo['_minutos_total'] += duracion_minutos
+                salida_efectiva = asistencia.salida
+                if salida_efectiva and asistencia.salida_motivo == Asistencia.MOTIVO_EXPIRADA:
+                    salida_efectiva = min(salida_efectiva, _expiracion_desde_asistencia(asistencia))
+
+                grupo['asistencias'].append({
+                    'id': asistencia.id,
+                    'entrada': asistencia.entrada.isoformat(),
+                    'salida': salida_efectiva.isoformat() if salida_efectiva else None,
+                    'salida_motivo': asistencia.salida_motivo,
+                    'estado': 'activo' if asistencia.salida is None else 'cerrada',
+                    'horas': self._format_horas(duracion_minutos),
+                })
+        except (ProgrammingError, OperationalError):
+            asistencias_legacy = (
+                Asistencia.objects
+                .filter(entrada__gte=inicio, entrada__lt=fin)
+                .values(
+                    'id',
+                    'becado_id',
+                    'entrada',
+                    'salida',
+                    'becado__user__first_name',
+                    'becado__user__last_name',
+                    'becado__user__username',
+                    'becado__user__is_active',
+                )
+                .order_by('becado__user__first_name', 'becado__user__last_name', 'entrada')
+            )
+
+            for asistencia in asistencias_legacy:
+                nombre_completo = (
+                    f"{asistencia['becado__user__first_name']} {asistencia['becado__user__last_name']}"
+                ).strip() or asistencia['becado__user__username']
+                grupo = grupos.setdefault(asistencia['becado_id'], {
+                    'becado_id': asistencia['becado_id'],
+                    'nombre_usuario': nombre_completo,
+                    'activo': bool(asistencia['becado__user__is_active']),
+                    'asistencias': [],
+                    '_minutos_total': 0,
+                })
+
+                salida = asistencia['salida'] or min(fin, timezone.now())
+                if salida < asistencia['entrada']:
+                    duracion_minutos = 0
+                else:
+                    delta = salida - asistencia['entrada']
+                    duracion_minutos = max(0, int(delta.total_seconds() // 60))
+
+                grupo['_minutos_total'] += duracion_minutos
+                grupo['asistencias'].append({
+                    'id': asistencia['id'],
+                    'entrada': asistencia['entrada'].isoformat(),
+                    'salida': asistencia['salida'].isoformat() if asistencia['salida'] else None,
+                    'salida_motivo': Asistencia.MOTIVO_MANUAL,
+                    'estado': 'activo' if asistencia['salida'] is None else 'cerrada',
+                    'horas': self._format_horas(duracion_minutos),
+                })
 
         usuarios = []
         total_minutos = 0

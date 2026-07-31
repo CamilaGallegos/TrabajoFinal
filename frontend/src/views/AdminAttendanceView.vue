@@ -55,7 +55,8 @@ const cargarResumen = async () => {
     if (status === 401 || status === 403) {
       error.value = 'No autorizado. Es posible que tu sesión haya expirado o tu usuario esté inhabilitado.'
     } else {
-      error.value = 'Error al cargar las asistencias'
+      const detalle = err?.response?.data?.detail || err?.response?.data?.error || err?.message
+      error.value = detalle ? `Error al cargar las asistencias: ${detalle}` : 'Error al cargar las asistencias'
     }
   } finally {
     cargando.value = false
@@ -159,7 +160,14 @@ const totalHorasTexto = (valor) => {
 
 const textoSalida = (asistencia) => {
   if (asistencia.salida) {
-    return formatearFecha(asistencia.salida)
+    const textoBase = formatearFecha(asistencia.salida)
+    if (asistencia.salida_motivo === 'expirada') {
+      return `${textoBase} (expirada)`
+    }
+    if (asistencia.salida_motivo === 'sin_cierre') {
+      return `${textoBase} (cierre automático)`
+    }
+    return textoBase
   }
 
   const entrada = new Date(asistencia.entrada)

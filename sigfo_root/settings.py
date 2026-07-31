@@ -146,6 +146,5 @@ REST_FRAMEWORK = {
 }
 
 SIMPLE_JWT = {
-    'ACCESS_TOKEN_LIFETIME': timedelta(hours=5),  # duracion de un turno aprox
-    'REFRESH_TOKEN_LIFETIME': timedelta(days=1),  # por si el becado se olvida de cerrar sesion
+    'ACCESS_TOKEN_LIFETIME': timedelta(hours=7),  # si supera un turno (6 horas), se cierra la sesion
 }

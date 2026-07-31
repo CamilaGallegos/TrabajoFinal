@@ -132,7 +132,7 @@ export function useAuth(options = {}) {
     timersPorSesion.clear()
   }
 
-  const registrarSalidaSesion = async (sesion) => {
+  const registrarSalidaSesion = async (sesion, { motivo = 'manual' } = {}) => {
     if (!sesion?.token || obtenerRolDeSesion(sesion) === 'admin') {
       return
     }
@@ -141,7 +141,7 @@ export function useAuth(options = {}) {
       // Enviamos el token en el cuerpo para que funcione aunque esté expirado
       await axios.post(
         'http://localhost:8000/api/fichaje/salida/',
-        { token: sesion.token },
+        { token: sesion.token, motivo },
         { headers: { Authorization: undefined } },
       )
     } catch (err) {
@@ -151,7 +151,7 @@ export function useAuth(options = {}) {
 
   const cerrarSesionPorId = async (idSesion, { expirada = false } = {}) => {
     const sesionAEliminar = sesionesActivas.value.find((sesion) => sesion.id === idSesion)
-    await registrarSalidaSesion(sesionAEliminar)
+    await registrarSalidaSesion(sesionAEliminar, { motivo: expirada ? 'expirada' : 'manual' })
 
     limpiarTimerSesion(idSesion)
     sesionesActivas.value = sesionesActivas.value.filter((sesion) => sesion.id !== idSesion)
@@ -198,7 +198,7 @@ export function useAuth(options = {}) {
 
   const cerrarTodasLasSesiones = async () => {
     for (const sesion of sesionesActivas.value) {
-      await registrarSalidaSesion(sesion)
+      await registrarSalidaSesion(sesion, { motivo: 'manual' })
     }
 
     limpiarTodosLosTimers()

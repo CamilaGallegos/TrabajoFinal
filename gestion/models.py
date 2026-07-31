@@ -30,9 +30,20 @@ class PerfilBecado(models.Model):
         return f"{self.user.username} - DNI: {self.dni}"
 
 class Asistencia(models.Model):
+    MOTIVO_MANUAL = 'manual'
+    MOTIVO_EXPIRADA = 'expirada'
+    MOTIVO_SIN_CIERRE = 'sin_cierre'
+
+    MOTIVO_SALIDA_CHOICES = [
+        (MOTIVO_MANUAL, 'Manual'),
+        (MOTIVO_EXPIRADA, 'Expirada'),
+        (MOTIVO_SIN_CIERRE, 'Sin cierre previo'),
+    ]
+
     becado = models.ForeignKey(PerfilBecado, on_delete=models.CASCADE)
     entrada = models.DateTimeField(auto_now_add=True)
     salida = models.DateTimeField(null=True, blank=True)
+    salida_motivo = models.CharField(max_length=20, choices=MOTIVO_SALIDA_CHOICES, default=MOTIVO_MANUAL)
 
     def __str__(self):
         return f"{self.becado.user.first_name} - {self.entrada.strftime('%d/%m %H:%M')}"

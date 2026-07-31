@@ -478,8 +478,6 @@ const irAlHistorial = async () => {
 
       <p v-if="errorMensaje" class="header-error">{{ errorMensaje }}</p>
 
-      <h1 class="title">Panel de Ventas</h1>
-
       <div v-if="ventaEnEdicionId" class="edit-banner">
         <strong>Editando venta #{{ ventaEnEdicionId }}</strong>
         <button type="button" class="btn-add" @click="cancelarEdicionVenta">Cancelar edicion</button>

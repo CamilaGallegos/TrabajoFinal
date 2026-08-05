@@ -1,5 +1,6 @@
 import { computed, ref } from 'vue'
 import axios from 'axios'
+import { decodificarPayloadJWT } from '../utils/authSession'
 
 export function useAuth(options = {}) {
   const { onLoginSuccess, onLogout, onSessionExpired } = options
@@ -71,22 +72,6 @@ export function useAuth(options = {}) {
       axios.defaults.headers.common.Authorization = `Bearer ${jwtToken}`
     } else {
       delete axios.defaults.headers.common.Authorization
-    }
-  }
-
-  const decodificarPayloadJWT = (jwtToken) => {
-    try {
-      const payloadBase64 = jwtToken.split('.')[1]
-      const payloadNormalizado = payloadBase64.replace(/-/g, '+').replace(/_/g, '/')
-      const payloadJson = decodeURIComponent(
-        atob(payloadNormalizado)
-          .split('')
-          .map((c) => `%${c.charCodeAt(0).toString(16).padStart(2, '0')}`)
-          .join('')
-      )
-      return JSON.parse(payloadJson)
-    } catch {
-      return null
     }
   }
 

@@ -8,65 +8,13 @@ import AdminHistoryView from '../views/AdminHistoryView.vue'
 import AdminReportsView from '../views/AdminReportsView.vue'
 import AdminAuditView from '../views/AdminAuditView.vue'
 import AdminOpenAccountsView from '../views/AdminOpenAccountsView.vue'
-
-const decodificarPayloadJWT = (jwtToken) => {
-  try {
-    const payloadBase64 = jwtToken.split('.')[1]
-    const payloadNormalizado = payloadBase64.replace(/-/g, '+').replace(/_/g, '/')
-    const payloadJson = decodeURIComponent(
-      atob(payloadNormalizado)
-        .split('')
-        .map((c) => `%${c.charCodeAt(0).toString(16).padStart(2, '0')}`)
-        .join('')
-    )
-    return JSON.parse(payloadJson)
-  } catch {
-    return null
-  }
-}
-
-const tokenExpirado = (jwtToken) => {
-  const payload = decodificarPayloadJWT(jwtToken)
-  const exp = payload?.exp
-  if (!exp) {
-    return true
-  }
-  return (exp * 1000) <= Date.now()
-}
-
-const limpiarAuthPersistida = () => {
-  localStorage.removeItem('sigfo_token')
-  localStorage.removeItem('sigfo_becado')
-  localStorage.removeItem('sigfo_role')
-  localStorage.removeItem('sigfo_sesiones')
-}
-
-const normalizarSesionesValidas = () => {
-  const sesionesRaw = localStorage.getItem('sigfo_sesiones')
-  if (!sesionesRaw) {
-    return []
-  }
-
-  try {
-    const sesiones = JSON.parse(sesionesRaw)
-    if (!Array.isArray(sesiones)) {
-      return []
-    }
-
-    const validas = sesiones.filter((sesion) => sesion?.token && !tokenExpirado(sesion.token))
-    if (validas.length !== sesiones.length) {
-      if (validas.length > 0) {
-        localStorage.setItem('sigfo_sesiones', JSON.stringify(validas))
-      } else {
-        localStorage.removeItem('sigfo_sesiones')
-      }
-    }
-    return validas
-  } catch {
-    localStorage.removeItem('sigfo_sesiones')
-    return []
-  }
-}
+import {
+  STORAGE_KEYS,
+  limpiarAuthPersistida,
+  normalizarSesionesValidas,
+  obtenerRolGuardado,
+  tokenExpirado,
+} from '../utils/authSession'
 
 const routes = [
   {
@@ -152,8 +100,8 @@ const existeSesionGuardada = () => {
     return true
   }
 
-  const tokenGuardado = localStorage.getItem('sigfo_token')
-  const becadoGuardado = localStorage.getItem('sigfo_becado')
+  const tokenGuardado = localStorage.getItem(STORAGE_KEYS.token)
+  const becadoGuardado = localStorage.getItem(STORAGE_KEYS.becado)
   if (!tokenGuardado || !becadoGuardado) {
     return false
   }
@@ -164,28 +112,6 @@ const existeSesionGuardada = () => {
   }
 
   return true
-}
-
-const obtenerRolGuardado = () => {
-  if (localStorage.getItem('sigfo_role') === 'admin') {
-    return 'admin'
-  }
-
-  const sesionesRaw = localStorage.getItem('sigfo_sesiones')
-  if (sesionesRaw) {
-    try {
-      const sesiones = JSON.parse(sesionesRaw)
-      if (Array.isArray(sesiones)) {
-        const sesionAdmin = sesiones.find((sesion) => sesion.role === 'admin' || sesion.isAdmin)
-        if (sesionAdmin) {
-          return 'admin'
-        }
-      }
-    } catch {
-    }
-  }
-
-  return 'becado'
 }
 
 router.beforeEach((to) => {

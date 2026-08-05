@@ -2,7 +2,8 @@ from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 
 from .views.becados_views import PerfilBecadoAdminViewSet
-from .views.productos_views import ProductoViewSet, CuentaAbiertaViewSet
+from .views.cuentas_abiertas_views import CuentaAbiertaViewSet
+from .views.productos_views import ProductoViewSet
 from .views.ventas_views import VentaViewSet, AuditoriaVentaViewSet, PagoCuentaAbiertaViewSet
 from .views.asistencia_views import FichajeEntradaView, FichajeSalidaView, ActividadSesionesView, AsistenciaResumenView
 from .views.reportes_views import ReporteDashboardResumenView, CuentaAbiertaResumenView, CuentaAbiertaEvolucionMensualView

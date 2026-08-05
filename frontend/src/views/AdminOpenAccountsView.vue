@@ -236,6 +236,12 @@ const cuentaSeleccionada = computed(() => {
   return cuentas.value.find((cuenta) => String(cuenta.cuenta_id) === String(cuentaSeleccionadaId.value)) || null
 })
 
+const cuentaSeleccionadaActiva = computed(() => cuentaSeleccionada.value?.activo !== false)
+
+const textoBotonEstadoCuenta = computed(() => {
+  return cuentaSeleccionadaActiva.value ? 'Inhabilitar cuenta' : 'Habilitar cuenta'
+})
+
 const opcionesCuentas = computed(() => {
   return cuentas.value.map((cuenta) => ({
     value: String(cuenta.cuenta_id),
@@ -378,23 +384,25 @@ const guardarCuenta = async () => {
   }
 }
 
-const inhabilitarCuentaSeleccionada = async () => {
+const toggleEstadoCuentaSeleccionada = async () => {
   if (!cuentaSeleccionada.value) {
     return
   }
 
-  const confirmar = window.confirm(`¿Querés inhabilitar la cuenta "${cuentaSeleccionada.value.nombre_departamento}"?`)
+  const nuevoEstado = !cuentaSeleccionadaActiva.value
+  const accionTexto = nuevoEstado ? 'habilitar' : 'inhabilitar'
+  const confirmar = window.confirm(`¿Querés ${accionTexto} la cuenta "${cuentaSeleccionada.value.nombre_departamento}"?`)
   if (!confirmar) {
     return
   }
 
   try {
     await axios.patch(`http://localhost:8000/api/cuentas-abiertas/${cuentaSeleccionada.value.cuenta_id}/`, {
-      activo: false,
+      activo: nuevoEstado,
     })
     await cargarResumen()
   } catch (err) {
-    error.value = 'No se pudo inhabilitar la cuenta'
+    error.value = `No se pudo ${accionTexto} la cuenta`
   }
 }
 
@@ -504,8 +512,8 @@ onMounted(() => {
           <button type="button" class="btn-secondary" :disabled="!cuentaSeleccionada" @click="abrirModalEditarCuenta">
             Editar cuenta
           </button>
-          <button type="button" class="btn-secondary" :disabled="!cuentaSeleccionada" @click="inhabilitarCuentaSeleccionada">
-            Inhabilitar cuenta
+          <button type="button" class="btn-secondary" :disabled="!cuentaSeleccionada" @click="toggleEstadoCuentaSeleccionada">
+            {{ textoBotonEstadoCuenta }}
           </button>
         </div>
 

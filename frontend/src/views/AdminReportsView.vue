@@ -309,23 +309,15 @@ const cargarTopProductos = async () => {
 }
 
 const cargarSaldosCuentasAbiertas = async () => {
-  if (!rangoSaldos.value.desde || !rangoSaldos.value.hasta) {
-    errorSaldos.value = 'Selecciona un mes valido'
-    return
-  }
-
   cargandoSaldos.value = true
   errorSaldos.value = ''
 
   try {
-    const data = await consultarCuentasAbiertas({
-      fechaDesde: rangoSaldos.value.desde,
-      fechaHasta: rangoSaldos.value.hasta,
-    })
+    const data = await consultarCuentasAbiertas({})
     saldosCuentas.value = (data.cuentas || []).map((cuenta) => ({
       cuenta: cuenta.nombre_departamento,
       saldo: Number(cuenta.total_pendiente || 0),
-    }))
+    })).filter((cuenta) => cuenta.saldo > 0)
   } catch (err) {
     saldosCuentas.value = []
     errorSaldos.value = 'No se pudo cargar el saldo de cuentas abiertas'
@@ -1078,26 +1070,19 @@ onMounted(() => {
 
       <article class="chart-card chart-card-full">
         <header class="chart-title">
-          <h3>Saldo pendiente total por cuenta abierta</h3>
+          <h3>Saldo pendiente actual por cuenta abierta</h3>
         </header>
 
         <div class="reports-actions chart-actions">
-          <label>
-            Mes
-            <input v-model="mesSaldos" type="month" />
-          </label>
-
           <button type="button" class="btn-refresh" @click="cargarSaldosCuentasAbiertas">
             Actualizar
           </button>
-
-          <small v-if="rangoSaldosTexto" class="week-range">Rango: {{ rangoSaldosTexto }}</small>
         </div>
 
         <div v-if="cargandoSaldos" class="estado-msg">Cargando saldos pendientes...</div>
         <div v-else-if="errorSaldos" class="estado-msg error">{{ errorSaldos }}</div>
         <div v-else-if="saldosCuentas.length === 0" class="estado-msg">
-          No hay cuentas abiertas con saldo para el mes seleccionado
+          No hay cuentas abiertas con saldo pendiente
         </div>
 
         <apexchart

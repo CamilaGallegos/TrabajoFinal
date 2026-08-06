@@ -9,6 +9,7 @@ const feedback = ref({ show: false, message: '', type: 'success' })
 const ventaFilter = ref('')
 const auditDrawer = ref(null)
 const productosPorId = ref({})
+const cuentasAbiertasPorId = ref({})
 let auditoriasIntervalId = null
 
 const mostrarFeedback = (message, type = 'success') => {
@@ -26,26 +27,16 @@ const normalizarFechaAuditoria = (fecha) => {
 }
 
 const agruparAuditorias = (lista) => {
-  const grupos = new Map()
-
-  for (const item of lista) {
-    const key = `${item.venta_id || ''}|${item.usuario_corrector || ''}|${normalizarFechaAuditoria(item.fecha_correccion)}|${item.motivo || ''}`
-
-    if (!grupos.has(key)) {
-      grupos.set(key, { ...item, cambios: [item] })
-      continue
-    }
-
-    grupos.get(key).cambios.push(item)
-  }
-
-  return Array.from(grupos.values()).map((grupo) => {
-    const campos = [...new Set(grupo.cambios.map((item) => item.campo_modificado).filter(Boolean))]
-    const valorAnterior = grupo.cambios
-      .map((item) => `${item.campo_modificado}=${item.valor_anterior}`)
+  return lista.map((item) => {
+    const grupo = { ...item, cambios: [item] }
+    const cambiosExpandidoAnterior = grupo.cambios.flatMap((item) => expandirCambioAuditoria(item, 'valor_anterior'))
+    const cambiosExpandidoNuevo = grupo.cambios.flatMap((item) => expandirCambioAuditoria(item, 'valor_nuevo'))
+    const campos = [...new Set(cambiosExpandidoNuevo.map((item) => item.campo).filter(Boolean))]
+    const valorAnterior = cambiosExpandidoAnterior
+      .map((item) => `${item.campo}=${item.valor}`)
       .join(' | ')
-    const valorNuevo = grupo.cambios
-      .map((item) => `${item.campo_modificado}=${item.valor_nuevo}`)
+    const valorNuevo = cambiosExpandidoNuevo
+      .map((item) => `${item.campo}=${item.valor}`)
       .join(' | ')
 
     return {
@@ -89,6 +80,39 @@ const formatearCampoAuditoria = (campo) => {
   return labels[campo] || campo || 'Cambio'
 }
 
+const formatearMontoAuditoria = (valor) => {
+  const numero = Number(valor)
+  if (Number.isNaN(numero)) {
+    return String(valor || 'Sin información')
+  }
+
+  return `$${numero.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+}
+
+const formatearTipoPagoAuditoria = (valor) => {
+  const labels = {
+    efectivo: 'Efectivo',
+    transferencia: 'Transferencia',
+    combinado: 'Combinado',
+    cuenta_abierta: 'Cuenta abierta',
+  }
+
+  return labels[String(valor || '').trim()] || String(valor || 'Sin información')
+}
+
+const formatearCuentaAbiertaAuditoria = (valor) => {
+  const texto = String(valor || '').trim()
+  if (!texto) {
+    return 'Sin cuenta abierta'
+  }
+
+  if (/^\d+$/.test(texto)) {
+    return cuentasAbiertasPorId.value[texto] || `Cuenta #${texto}`
+  }
+
+  return texto
+}
+
 const resolverNombreProducto = (valor) => {
   const texto = String(valor || '').trim()
   if (!texto) return 'Producto'
@@ -103,56 +127,142 @@ const resolverNombreProducto = (valor) => {
 const formatearDetalleAuditoria = (rawValor) => {
   const partes = String(rawValor || '').split(':')
   if (partes.length !== 3) {
-    return `Detalles: ${rawValor}`
+    return String(rawValor || 'Sin información')
   }
 
   const [productoRef, cantidad, precioUnitario] = partes
   const productoNombre = resolverNombreProducto(productoRef)
-  return `Detalles: ${productoNombre} x ${cantidad} · $${precioUnitario}`
+  return `${productoNombre} x ${cantidad} · ${formatearMontoAuditoria(precioUnitario)}`
 }
 
-const formatearValorAuditoria = (valor) => {
-  if (!valor) return 'Sin información'
+const parsearPartesAuditoria = (valor) => {
+  const texto = String(valor || '').trim()
+  if (!texto) {
+    return []
+  }
 
-  const texto = String(valor)
+  return texto
+    .split(' | ')
+    .map((parte) => parte.trim())
+    .filter(Boolean)
+}
 
-  if (texto.includes('=') && texto.includes('|')) {
+const normalizarCampoValor = (parte) => {
+  const indice = parte.indexOf('=')
+  if (indice === -1) {
+    return { campo: '', valor: parte }
+  }
+
+  return {
+    campo: parte.slice(0, indice).trim(),
+    valor: parte.slice(indice + 1).trim(),
+  }
+}
+
+const expandirCambioAuditoria = (item, lado) => {
+  const valor = item?.[lado]
+  const campo = String(item?.campo_modificado || '').trim()
+
+  if (!campo) {
+    return []
+  }
+
+  if (campo !== 'Varios campos') {
+    return [{ campo, valor: String(valor || '') }]
+  }
+
+  const partes = parsearPartesAuditoria(valor)
+  if (partes.length === 0) {
+    return []
+  }
+
+  return partes.map((parte) => {
+    const normalizado = normalizarCampoValor(parte)
+    return {
+      campo: normalizado.campo || campo,
+      valor: normalizado.valor,
+    }
+  })
+}
+
+const formatearValorCampoAuditoria = (campo, valor) => {
+  const texto = String(valor || '').trim()
+  if (!texto) {
+    return 'Sin información'
+  }
+
+  if (campo === 'detalles') {
     return texto
       .split('|')
       .map((parte) => parte.trim())
       .filter(Boolean)
-      .map((parte) => {
-        const [campo, rawValor] = parte.split('=')
-        const etiqueta = formatearCampoAuditoria(campo)
-
-        if (campo === 'detalles') {
-          return formatearDetalleAuditoria(rawValor)
-        }
-
-        if (['total', 'monto_efectivo', 'monto_transferencia'].includes(campo)) {
-          const numero = Number(rawValor)
-          if (!Number.isNaN(numero)) {
-            return `${etiqueta}: $${numero.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-          }
-        }
-
-        return `${etiqueta}: ${rawValor}`
-      })
-      .join(' · ')
+      .map((parte) => formatearDetalleAuditoria(parte))
+      .join('\n')
   }
 
-  if (texto.includes('=')) {
-    const [campo, rawValor] = texto.split('=')
-    if (campo === 'detalles') {
-      return formatearDetalleAuditoria(rawValor)
-    }
+  if (['total', 'monto_efectivo', 'monto_transferencia'].includes(campo)) {
+    return formatearMontoAuditoria(texto)
+  }
 
-    const etiqueta = formatearCampoAuditoria(campo)
-    return `${etiqueta}: ${rawValor}`
+  if (campo === 'tipo_pago') {
+    return formatearTipoPagoAuditoria(texto)
+  }
+
+  if (campo === 'cuenta_abierta') {
+    return formatearCuentaAbiertaAuditoria(texto)
   }
 
   return texto
 }
+
+const construirFilasCambioAuditoria = (auditoria) => {
+  if (!auditoria) {
+    return []
+  }
+
+  const anteriores = new Map()
+  const nuevos = new Map()
+  const ordenCampos = []
+
+  const registrarCampo = (campo) => {
+    if (campo && !ordenCampos.includes(campo)) {
+      ordenCampos.push(campo)
+    }
+  }
+
+  for (const parte of parsearPartesAuditoria(auditoria.valor_anterior)) {
+    const { campo, valor } = normalizarCampoValor(parte)
+    const campoNormalizado = campo || auditoria.campo_modificado
+    registrarCampo(campoNormalizado)
+    anteriores.set(campoNormalizado, valor)
+  }
+
+  for (const parte of parsearPartesAuditoria(auditoria.valor_nuevo)) {
+    const { campo, valor } = normalizarCampoValor(parte)
+    const campoNormalizado = campo || auditoria.campo_modificado
+    registrarCampo(campoNormalizado)
+    nuevos.set(campoNormalizado, valor)
+  }
+
+  if (ordenCampos.length === 0) {
+    const campo = auditoria.campo_modificado || 'Cambio'
+    return [{
+      campo,
+      etiqueta: formatearCampoAuditoria(campo),
+      valorAnterior: formatearValorCampoAuditoria(campo, auditoria.valor_anterior),
+      valorNuevo: formatearValorCampoAuditoria(campo, auditoria.valor_nuevo),
+    }]
+  }
+
+  return ordenCampos.map((campo) => ({
+    campo,
+    etiqueta: formatearCampoAuditoria(campo),
+    valorAnterior: formatearValorCampoAuditoria(campo, anteriores.get(campo)),
+    valorNuevo: formatearValorCampoAuditoria(campo, nuevos.get(campo)),
+  }))
+}
+
+const filasCambioDrawer = computed(() => construirFilasCambioAuditoria(auditDrawer.value))
 
 const obtenerProductosAuditoria = async () => {
   try {
@@ -164,6 +274,21 @@ const obtenerProductosAuditoria = async () => {
     }, {})
   } catch (error) {
     productosPorId.value = {}
+  }
+}
+
+const obtenerCuentasAbiertasAuditoria = async () => {
+  try {
+    const respuesta = await axios.get('http://localhost:8000/api/cuentas-abiertas/', {
+      params: { incluye_inactivas: true },
+    })
+    const cuentas = Array.isArray(respuesta.data) ? respuesta.data : []
+    cuentasAbiertasPorId.value = cuentas.reduce((acc, cuenta) => {
+      acc[String(cuenta.id)] = cuenta.nombre_departamento
+      return acc
+    }, {})
+  } catch (error) {
+    cuentasAbiertasPorId.value = {}
   }
 }
 
@@ -189,7 +314,7 @@ const obtenerAuditorias = async () => {
 }
 
 const refrescarAuditorias = async () => {
-  await Promise.all([obtenerProductosAuditoria(), obtenerAuditorias()])
+  await Promise.all([obtenerProductosAuditoria(), obtenerCuentasAbiertasAuditoria(), obtenerAuditorias()])
 }
 
 const manejarCambioVisibilidad = () => {
@@ -313,21 +438,25 @@ onBeforeUnmount(() => {
               <dd>{{ auditDrawer.usuario_nombre || 'N/A' }}</dd>
               <dt>Fecha de edición</dt>
               <dd>{{ formatearFechaAuditoria(auditDrawer.fecha_correccion) }}</dd>
-              <dt>Campo modificado</dt>
-              <dd class="campo-destaque">{{ formatearCampoAuditoria(auditDrawer.campo_modificado) }}</dd>
             </dl>
 
-            <div class="cambio-valores">
-              <div class="valor-anterior">
-                <h4>Valor anterior</h4>
-                <p class="valor-texto">{{ formatearValorAuditoria(auditDrawer.valor_anterior) }}</p>
+            <section class="cambio-detalle-card">
+              <header class="cambio-detalle-header">
+                <h4>Cambios</h4>
+              </header>
+
+              <div class="cambio-grid-header">
+                <span>Campo</span>
+                <span>Antes</span>
+                <span>Después</span>
               </div>
-              <div class="flecha-cambio">→</div>
-              <div class="valor-nuevo">
-                <h4>Valor nuevo</h4>
-                <p class="valor-texto">{{ formatearValorAuditoria(auditDrawer.valor_nuevo) }}</p>
+
+              <div v-for="fila in filasCambioDrawer" :key="`${auditDrawer.id}-${fila.campo}`" class="cambio-grid-row">
+                <div class="campo-pill">{{ fila.etiqueta }}</div>
+                <pre class="valor-box valor-box--anterior">{{ fila.valorAnterior }}</pre>
+                <pre class="valor-box valor-box--nuevo">{{ fila.valorNuevo }}</pre>
               </div>
-            </div>
+            </section>
 
             <div v-if="auditDrawer.motivo" class="motivo-seccion">
               <h4>Motivo de la corrección</h4>
@@ -622,10 +751,7 @@ onBeforeUnmount(() => {
   color: #0578af;
 }
 
-.cambio-valores {
-  display: flex;
-  gap: 16px;
-  align-items: center;
+.cambio-detalle-card {
   margin-bottom: 20px;
   padding: 16px;
   background: #f8fafc;
@@ -633,44 +759,83 @@ onBeforeUnmount(() => {
   border: 1px solid #e2e8f0;
 }
 
-.valor-anterior,
-.valor-nuevo {
-  flex: 1;
+.cambio-detalle-header {
+  margin-bottom: 14px;
 }
 
-.valor-anterior h4,
-.valor-nuevo h4 {
-  margin: 0 0 8px;
-  font-size: 12px;
-  text-transform: uppercase;
-  color: #64748b;
-  font-weight: 600;
-}
-
-.valor-anterior h4 {
-  color: #dc2626;
-}
-
-.valor-nuevo h4 {
-  color: #059669;
-}
-
-.valor-texto {
-  margin: 0;
-  padding: 8px;
-  background: #ffffff;
-  border-radius: 6px;
-  border: 1px solid #e2e8f0;
-  word-break: break-all;
-  font-size: 13px;
+.cambio-detalle-header h4 {
+  margin: 0 0 4px;
+  font-size: 14px;
   color: #0f172a;
 }
 
-.flecha-cambio {
-  flex: 0 0 auto;
-  font-size: 20px;
+.cambio-detalle-header p {
+  margin: 0;
   color: #64748b;
-  font-weight: bold;
+  font-size: 13px;
+}
+
+.cambio-grid-header,
+.cambio-grid-row {
+  display: grid;
+  grid-template-columns: 140px 1fr 1fr;
+  gap: 12px;
+  align-items: start;
+}
+
+.cambio-grid-header {
+  padding: 0 0 10px;
+  border-bottom: 1px solid #dbe4ee;
+  margin-bottom: 12px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: #64748b;
+}
+
+.cambio-grid-row {
+  padding: 12px 0;
+  border-bottom: 1px solid #e7edf4;
+}
+
+.cambio-grid-row:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.campo-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 40px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: #eaf4fb;
+  color: #055a82;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.valor-box {
+  margin: 0;
+  padding: 10px 12px;
+  background: #ffffff;
+  border-radius: 10px;
+  border: 1px solid #e2e8f0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 13px;
+  color: #0f172a;
+  line-height: 1.5;
+}
+
+.valor-box--anterior {
+  border-left: 4px solid #fca5a5;
+  background: #fff7f7;
+}
+
+.valor-box--nuevo {
+  border-left: 4px solid #86efac;
+  background: #f4fff7;
 }
 
 .motivo-seccion {
@@ -699,13 +864,12 @@ onBeforeUnmount(() => {
 }
 
 @media (max-width: 760px) {
-  .cambio-valores {
-    flex-direction: column;
-    gap: 12px;
+  .cambio-grid-header {
+    display: none;
   }
 
-  .flecha-cambio {
-    transform: rotate(90deg);
+  .cambio-grid-row {
+    grid-template-columns: 1fr;
   }
 
   .drawer {

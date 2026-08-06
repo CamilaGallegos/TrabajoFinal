@@ -113,7 +113,7 @@ const drawerModo = ref('')
 const cuentasAbiertasPorId = computed(() => {
   const mapa = new Map()
   for (const cuenta of cuentasAbiertas.value) {
-    mapa.set(Number(cuenta.id), cuenta.nombre_departamento)
+    mapa.set(Number(cuenta.id), cuenta.nombre || cuenta.nombre_departamento || '')
   }
   return mapa
 })

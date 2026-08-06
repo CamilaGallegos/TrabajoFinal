@@ -3,12 +3,16 @@ import { computed, onMounted, ref } from 'vue'
 import axios from 'axios'
 
 const semanaMovimiento = ref('')
+const mesVistaMovimiento = ref('')
+const selectorSemanaMovimientoAbierto = ref(false)
 const incluirFindeMovimiento = ref(false)
 const movimientoDiaSemana = ref([])
 const cargandoMovimiento = ref(false)
 const errorMovimiento = ref('')
 
 const semanaHoras = ref('')
+const mesVistaHoras = ref('')
+const selectorSemanaHorasAbierto = ref(false)
 const incluirFindeHoras = ref(false)
 const flujoDiaHora = ref([])
 const cargandoHoras = ref(false)
@@ -47,6 +51,14 @@ const obtenerMesActual = () => {
   return `${year}-${month}`
 }
 
+const DIAS_SEMANA_CORTO = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom']
+
+const formateadorMes = new Intl.DateTimeFormat('es-AR', {
+  month: 'long',
+  year: 'numeric',
+  timeZone: 'UTC',
+})
+
 const obtenerRangoMes = (valor) => {
   if (!valor || !valor.includes('-')) {
     return { desde: '', hasta: '' }
@@ -74,6 +86,117 @@ const formatearFechaIso = (fecha) => {
   const month = String(fecha.getUTCMonth() + 1).padStart(2, '0')
   const day = String(fecha.getUTCDate()).padStart(2, '0')
   return `${year}-${month}-${day}`
+}
+
+const obtenerFechaUtcDesdeIso = (valor) => {
+  if (!valor) {
+    return null
+  }
+
+  const [yearPart, monthPart, dayPart] = valor.split('-')
+  const year = Number(yearPart)
+  const month = Number(monthPart)
+  const day = Number(dayPart)
+
+  if (!year || !month || !day) {
+    return null
+  }
+
+  return new Date(Date.UTC(year, month - 1, day))
+}
+
+const obtenerInicioSemanaUtc = (fecha) => {
+  const inicio = new Date(fecha)
+  const diaSemana = (inicio.getUTCDay() + 6) % 7
+  inicio.setUTCDate(inicio.getUTCDate() - diaSemana)
+  return inicio
+}
+
+const obtenerFinSemanaUtc = (fecha) => {
+  const fin = obtenerInicioSemanaUtc(fecha)
+  fin.setUTCDate(fin.getUTCDate() + 6)
+  return fin
+}
+
+const obtenerSemanaIsoDesdeFecha = (fecha) => {
+  const fechaUtc = new Date(Date.UTC(fecha.getUTCFullYear(), fecha.getUTCMonth(), fecha.getUTCDate()))
+  const diaSemana = (fechaUtc.getUTCDay() + 6) % 7
+  fechaUtc.setUTCDate(fechaUtc.getUTCDate() + 3 - diaSemana)
+
+  const year = fechaUtc.getUTCFullYear()
+  const primerJueves = new Date(Date.UTC(year, 0, 4))
+  const primerDiaSemana = (primerJueves.getUTCDay() + 6) % 7
+  primerJueves.setUTCDate(primerJueves.getUTCDate() + 3 - primerDiaSemana)
+
+  const week = 1 + Math.round((fechaUtc - primerJueves) / (7 * 24 * 60 * 60 * 1000))
+  return `${year}-W${String(week).padStart(2, '0')}`
+}
+
+const desplazarMesIso = (valor, delta) => {
+  const referencia = valor ? obtenerFechaUtcDesdeIso(`${valor}-01`) : obtenerFechaUtcDesdeIso(`${obtenerMesActual()}-01`)
+  if (!referencia) {
+    return obtenerMesActual()
+  }
+
+  referencia.setUTCMonth(referencia.getUTCMonth() + delta)
+  return `${referencia.getUTCFullYear()}-${String(referencia.getUTCMonth() + 1).padStart(2, '0')}`
+}
+
+const obtenerEtiquetaMes = (valor) => {
+  const fecha = valor ? obtenerFechaUtcDesdeIso(`${valor}-01`) : null
+  if (!fecha) {
+    return ''
+  }
+
+  const texto = formateadorMes.format(fecha)
+  return texto.charAt(0).toUpperCase() + texto.slice(1)
+}
+
+const obtenerMesVistaDesdeSemana = (valor) => {
+  const rango = obtenerRangoSemana(valor)
+  if (!rango.desde) {
+    return obtenerMesActual()
+  }
+
+  return rango.desde.slice(0, 7)
+}
+
+const obtenerSemanasCalendario = (mesIso) => {
+  const fechaMes = obtenerFechaUtcDesdeIso(`${mesIso || obtenerMesActual()}-01`)
+  if (!fechaMes) {
+    return []
+  }
+
+  const inicioCalendario = obtenerInicioSemanaUtc(fechaMes)
+  const finMes = new Date(Date.UTC(fechaMes.getUTCFullYear(), fechaMes.getUTCMonth() + 1, 0))
+  const finCalendario = obtenerFinSemanaUtc(finMes)
+  const semanas = []
+  const cursor = new Date(inicioCalendario)
+
+  while (cursor <= finCalendario) {
+    const inicioSemana = new Date(cursor)
+    const finSemana = new Date(cursor)
+    finSemana.setUTCDate(finSemana.getUTCDate() + 6)
+
+    semanas.push({
+      iso: obtenerSemanaIsoDesdeFecha(inicioSemana),
+      rangoTexto: `${formatearFechaIso(inicioSemana)} al ${formatearFechaIso(finSemana)}`,
+      dias: Array.from({ length: 7 }, (_, index) => {
+        const fecha = new Date(inicioSemana)
+        fecha.setUTCDate(inicioSemana.getUTCDate() + index)
+
+        return {
+          iso: formatearFechaIso(fecha),
+          numero: fecha.getUTCDate(),
+          fueraMes: fecha.getUTCMonth() !== fechaMes.getUTCMonth(),
+        }
+      }),
+    })
+
+    cursor.setUTCDate(cursor.getUTCDate() + 7)
+  }
+
+  return semanas
 }
 
 const semanaActualIso = () => {
@@ -144,6 +267,10 @@ const rangoMetodoTexto = computed(() => rangoTexto(rangoMetodo.value))
 const rangoTotalTexto = computed(() => rangoTexto(rangoTotal.value))
 const rangoTopTexto = computed(() => rangoTexto(rangoTop.value))
 const rangoSaldosTexto = computed(() => rangoTexto(rangoSaldos.value))
+const calendarioMovimiento = computed(() => obtenerSemanasCalendario(mesVistaMovimiento.value))
+const calendarioHoras = computed(() => obtenerSemanasCalendario(mesVistaHoras.value))
+const etiquetaMesMovimiento = computed(() => obtenerEtiquetaMes(mesVistaMovimiento.value))
+const etiquetaMesHoras = computed(() => obtenerEtiquetaMes(mesVistaHoras.value))
 
 const rangoEvolucionTexto = computed(() => {
   const desde = mesEvolucionDesde.value || ''
@@ -153,6 +280,36 @@ const rangoEvolucionTexto = computed(() => {
   }
   return `${desde} a ${hasta}`
 })
+
+const seleccionarSemanaMovimiento = (semanaIso) => {
+  semanaMovimiento.value = semanaIso
+  selectorSemanaMovimientoAbierto.value = false
+}
+
+const seleccionarSemanaHoras = (semanaIso) => {
+  semanaHoras.value = semanaIso
+  selectorSemanaHorasAbierto.value = false
+}
+
+const navegarMesMovimiento = (delta) => {
+  mesVistaMovimiento.value = desplazarMesIso(mesVistaMovimiento.value, delta)
+}
+
+const navegarMesHoras = (delta) => {
+  mesVistaHoras.value = desplazarMesIso(mesVistaHoras.value, delta)
+}
+
+const validarRangoSemanal = (desde, hasta) => {
+  if (!desde || !hasta) {
+    return 'Selecciona una semana valida'
+  }
+
+  if (desde > hasta) {
+    return 'La fecha desde no puede ser mayor a la fecha hasta'
+  }
+
+  return ''
+}
 
 const consultarResumen = async ({ fechaDesde, fechaHasta, incluirFinde = false }) => {
   const respuesta = await axios.get('http://localhost:8000/api/reportes/dashboard-resumen/', {
@@ -192,8 +349,9 @@ const consultarEvolucionCuentasAbiertas = async ({ fechaDesde, fechaHasta }) => 
 }
 
 const cargarMovimientoSemana = async () => {
-  if (!rangoMovimiento.value.desde || !rangoMovimiento.value.hasta) {
-    errorMovimiento.value = 'Selecciona una semana valida'
+  const errorRango = validarRangoSemanal(rangoMovimiento.value.desde, rangoMovimiento.value.hasta)
+  if (errorRango) {
+    errorMovimiento.value = errorRango
     return
   }
 
@@ -216,8 +374,9 @@ const cargarMovimientoSemana = async () => {
 }
 
 const cargarHorasSemana = async () => {
-  if (!rangoHoras.value.desde || !rangoHoras.value.hasta) {
-    errorHoras.value = 'Selecciona una semana valida'
+  const errorRango = validarRangoSemanal(rangoHoras.value.desde, rangoHoras.value.hasta)
+  if (errorRango) {
+    errorHoras.value = errorRango
     return
   }
 
@@ -866,6 +1025,8 @@ onMounted(() => {
 
   semanaMovimiento.value = semanaActual
   semanaHoras.value = semanaActual
+  mesVistaMovimiento.value = obtenerMesVistaDesdeSemana(semanaActual)
+  mesVistaHoras.value = obtenerMesVistaDesdeSemana(semanaActual)
   mesMetodo.value = mesActual
   mesTotal.value = mesActual
   mesTop.value = mesActual
@@ -899,10 +1060,50 @@ onMounted(() => {
         </header>
 
         <div class="reports-actions chart-actions">
-          <label>
-            Semana
-            <input v-model="semanaMovimiento" type="week" />
-          </label>
+          <div class="calendar-dropdown">
+            <button
+              type="button"
+              class="week-picker-trigger"
+              @click="selectorSemanaMovimientoAbierto = !selectorSemanaMovimientoAbierto"
+            >
+              {{ rangoMovimientoTexto || 'Elegir semana' }}
+            </button>
+
+            <div v-if="selectorSemanaMovimientoAbierto" class="calendar-popover">
+              <div class="calendar-toolbar">
+                <button type="button" class="calendar-nav" @click="navegarMesMovimiento(-1)">
+                  Anterior
+                </button>
+                <strong>{{ etiquetaMesMovimiento }}</strong>
+                <button type="button" class="calendar-nav" @click="navegarMesMovimiento(1)">
+                  Siguiente
+                </button>
+              </div>
+
+              <div class="calendar-head">
+                <span v-for="dia in DIAS_SEMANA_CORTO" :key="`mov-head-${dia}`">{{ dia }}</span>
+              </div>
+
+              <button
+                v-for="semana in calendarioMovimiento"
+                :key="semana.iso"
+                type="button"
+                class="calendar-week-row"
+                :class="{ 'is-selected': semana.iso === semanaMovimiento }"
+                :aria-label="`Semana ${semana.rangoTexto}`"
+                @click="seleccionarSemanaMovimiento(semana.iso)"
+              >
+                <span
+                  v-for="dia in semana.dias"
+                  :key="dia.iso"
+                  class="calendar-day"
+                  :class="{ 'is-outside': dia.fueraMes }"
+                >
+                  {{ dia.numero }}
+                </span>
+              </button>
+            </div>
+          </div>
 
           <label class="check-control">
             <input v-model="incluirFindeMovimiento" type="checkbox" />
@@ -912,8 +1113,6 @@ onMounted(() => {
           <button type="button" class="btn-refresh" @click="cargarMovimientoSemana">
             Actualizar
           </button>
-
-          <small v-if="rangoMovimientoTexto" class="week-range">Rango: {{ rangoMovimientoTexto }}</small>
         </div>
 
         <div v-if="cargandoMovimiento" class="estado-msg">Cargando movimiento semanal...</div>
@@ -937,10 +1136,50 @@ onMounted(() => {
         </header>
 
         <div class="reports-actions chart-actions">
-          <label>
-            Semana
-            <input v-model="semanaHoras" type="week" />
-          </label>
+          <div class="calendar-dropdown">
+            <button
+              type="button"
+              class="week-picker-trigger"
+              @click="selectorSemanaHorasAbierto = !selectorSemanaHorasAbierto"
+            >
+              {{ rangoHorasTexto || 'Elegir semana' }}
+            </button>
+
+            <div v-if="selectorSemanaHorasAbierto" class="calendar-popover">
+              <div class="calendar-toolbar">
+                <button type="button" class="calendar-nav" @click="navegarMesHoras(-1)">
+                  Anterior
+                </button>
+                <strong>{{ etiquetaMesHoras }}</strong>
+                <button type="button" class="calendar-nav" @click="navegarMesHoras(1)">
+                  Siguiente
+                </button>
+              </div>
+
+              <div class="calendar-head">
+                <span v-for="dia in DIAS_SEMANA_CORTO" :key="`horas-head-${dia}`">{{ dia }}</span>
+              </div>
+
+              <button
+                v-for="semana in calendarioHoras"
+                :key="semana.iso"
+                type="button"
+                class="calendar-week-row"
+                :class="{ 'is-selected': semana.iso === semanaHoras }"
+                :aria-label="`Semana ${semana.rangoTexto}`"
+                @click="seleccionarSemanaHoras(semana.iso)"
+              >
+                <span
+                  v-for="dia in semana.dias"
+                  :key="dia.iso"
+                  class="calendar-day"
+                  :class="{ 'is-outside': dia.fueraMes }"
+                >
+                  {{ dia.numero }}
+                </span>
+              </button>
+            </div>
+          </div>
 
           <label class="check-control">
             <input v-model="incluirFindeHoras" type="checkbox" />
@@ -950,8 +1189,6 @@ onMounted(() => {
           <button type="button" class="btn-refresh" @click="cargarHorasSemana">
             Actualizar
           </button>
-
-          <small v-if="rangoHorasTexto" class="week-range">Rango: {{ rangoHorasTexto }}</small>
         </div>
 
         <div v-if="cargandoHoras" class="estado-msg">Cargando horas pico...</div>
@@ -1200,6 +1437,120 @@ onMounted(() => {
   padding-bottom: 8px;
 }
 
+.calendar-dropdown {
+  position: relative;
+}
+
+.week-picker-trigger {
+  min-width: 210px;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  padding: 9px 12px;
+  background: #ffffff;
+  color: #0f172a;
+  font-size: 13px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.calendar-popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 20;
+  width: min(360px, calc(100vw - 64px));
+  border: 1px solid #d8dde6;
+  border-radius: 14px;
+  padding: 14px;
+  background: linear-gradient(180deg, #f8fbfd 0%, #ffffff 100%);
+  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.14);
+}
+
+.calendar-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.calendar-toolbar strong {
+  color: #0f172a;
+  font-size: 15px;
+  text-transform: capitalize;
+}
+
+.calendar-nav {
+  border: 1px solid #bfd7ea;
+  background: #ffffff;
+  color: #0b5f8a;
+  border-radius: 10px;
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.calendar-nav:hover {
+  background: #eaf6fc;
+}
+
+.calendar-head,
+.calendar-week-row {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.calendar-head {
+  margin-bottom: 8px;
+}
+
+.calendar-head span {
+  text-align: center;
+  font-size: 11px;
+  font-weight: 700;
+  color: #64748b;
+}
+
+.calendar-week-row {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  padding: 4px;
+  border-radius: 12px;
+  margin-bottom: 4px;
+  cursor: pointer;
+  transition: background 0.18s ease, transform 0.18s ease;
+}
+
+.calendar-week-row:hover {
+  background: #eaf6fc;
+  transform: translateY(-1px);
+}
+
+.calendar-week-row.is-selected {
+  background: #d9effa;
+}
+
+.calendar-day {
+  min-height: 42px;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  background: #ffffff;
+  border: 1px solid #dbe7f0;
+  color: #0f172a;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.calendar-day.is-outside {
+  color: #94a3b8;
+  background: #f8fafc;
+}
+
 .check-control {
   display: flex;
   align-items: center;
@@ -1268,6 +1619,28 @@ onMounted(() => {
 @media (max-width: 900px) {
   .reports-header {
     flex-direction: column;
+  }
+
+  .calendar-toolbar {
+    flex-wrap: wrap;
+  }
+
+  .week-picker-trigger,
+  .calendar-nav,
+  .calendar-toolbar strong {
+    width: 100%;
+    text-align: center;
+  }
+
+  .calendar-popover {
+    left: 0;
+    right: auto;
+    width: min(100vw - 48px, 360px);
+  }
+
+  .calendar-day {
+    min-height: 36px;
+    font-size: 12px;
   }
 }
 </style>
